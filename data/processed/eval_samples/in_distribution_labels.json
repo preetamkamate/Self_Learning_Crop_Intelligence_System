@@ -1,0 +1,62 @@
+[
+  {
+    "file": "Apple___Apple_scab.jpg",
+    "ground_truth": "Apple Scab"
+  },
+  {
+    "file": "Apple___Black_rot.jpg",
+    "ground_truth": "Apple with Black Rot"
+  },
+  {
+    "file": "Apple___Cedar_apple_rust.jpg",
+    "ground_truth": "Cedar Apple Rust"
+  },
+  {
+    "file": "Apple___healthy.jpg",
+    "ground_truth": "Healthy Apple"
+  },
+  {
+    "file": "Corn_(maize)___Common_rust_.jpg",
+    "ground_truth": "Corn (Maize) with Common Rust"
+  },
+  {
+    "file": "Corn_(maize)___Northern_Leaf_Blight.jpg",
+    "ground_truth": "Corn (Maize) with Northern Leaf Blight"
+  },
+  {
+    "file": "Corn_(maize)___healthy.jpg",
+    "ground_truth": "Healthy Corn (Maize) Plant"
+  },
+  {
+    "file": "Grape___Black_rot.jpg",
+    "ground_truth": "Grape with Black Rot"
+  },
+  {
+    "file": "Grape___healthy.jpg",
+    "ground_truth": "Healthy Grape Plant"
+  },
+  {
+    "file": "Potato___Early_blight.jpg",
+    "ground_truth": "Potato with Early Blight"
+  },
+  {
+    "file": "Potato___Late_blight.jpg",
+    "ground_truth": "Potato with Late Blight"
+  },
+  {
+    "file": "Potato___healthy.jpg",
+    "ground_truth": "Healthy Potato Plant"
+  },
+  {
+    "file": "Tomato___Bacterial_spot.jpg",
+    "ground_truth": "Tomato with Bacterial Spot"
+  },
+  {
+    "file": "Tomato___Early_blight.jpg",
+    "ground_truth": "Tomato with Early Blight"
+  },
+  {
+    "file": "Tomato___healthy.jpg",
+    "ground_truth": "Healthy Tomato Plant"
+  }
+]

@@ -1,0 +1,140 @@
+[
+  {
+    "source": "cotton_icar_uas_guidelines.md",
+    "header": "1. Overview & Agro-Climatic Requirements",
+    "content": "[1. Overview & Agro-Climatic Requirements]\n- **Institution**: ICAR - Central Institute for Cotton Research (CICR) & UAS Dharwad (Agricultural Research Station Dharwad/Siruguppa).\n- **Key Karnataka Hybrids & Varieties**: DCH-32, Bunny Bt, RCH-2 Bt, Mallika Bt, Sahana, Jayadhar (desi cotton for rainfed northern black soils).\n- **Soil & pH**: Deep black cotton soils (vertisols) or fertile sandy loams with excellent drainage. pH 6.5 to 8.5. Tolerates mild salinity.\n- **Climate & Temperature**: Warm climate with abundant sunshine. Minimum temperature for germination 16°C; optimal vegetative growth 21°C - 30°C. Water requirement 700-1200 mm.\n- **Fertilizer Dose**: Irrigated Bt cotton: 150:75:75 kg N:P2O5:K2O per ha. Split nitrogen: 25% basal, 25% square initiation (35 DAS), 25% flowering (60 DAS), 25% boll development (80 DAS). Spray 1% Magnesium Sulphate + 1% 19:19:19 to prevent leaf reddening.",
+    "word_count": 126
+  },
+  {
+    "source": "cotton_icar_uas_guidelines.md",
+    "header": "A. Bacterial Blight / Black Arm (Xanthomonas citri pv. malvacearum)",
+    "content": "[A. Bacterial Blight / Black Arm (Xanthomonas citri pv. malvacearum)]\n- **Symptoms**:\n  - Angular leaf spot: Small, angular, dark green water-soaked spots delimited by leaf veinlets.\n  - Black arm: Black elongated cankers on petioles and stems, causing branch girdling and breakage.\n  - Boll rot: Round, water-soaked black spots on bolls leading to internal lint discoloration.\n- **Favorable Weather**: High humidity (>85%), temperatures 28°C - 35°C, windy rainstorms.\n- **Management**:\n  - Delint acid-delinted seeds with concentrated H2SO4 (100 ml/kg seed) followed by seed treatment with Streptocycline @ 0.1 g/kg.\n  - Spray Copper Oxychloride 50% WP @ 2.5 g/L mixed with Streptocycline @ 0.1 g/L (1 g in 10 L water) at 15-day intervals upon first appearance of angular spots.",
+    "word_count": 108
+  },
+  {
+    "source": "cotton_icar_uas_guidelines.md",
+    "header": "B. Alternaria Leaf Spot (Alternaria macrospora)",
+    "content": "[B. Alternaria Leaf Spot (Alternaria macrospora)]\n- **Symptoms**: Brown, circular spots with concentric rings on leaves. As spots coalesce, center dries, cracks, and falls out creating a \"shot-hole\" effect. Severe infection triggers heavy premature defoliation.\n- **Management**:\n  - Balanced nutrition: Avoid potassium deficiency which predisposes cotton to Alternaria.\n  - Foliar spray: Mancozeb 75% WP @ 2.5 g/L or Propiconazole 25% EC @ 1.0 ml/L or Kresoxim-methyl 44.3% SC @ 1.0 ml/L.",
+    "word_count": 65
+  },
+  {
+    "source": "cotton_icar_uas_guidelines.md",
+    "header": "C. Cotton Sucking Pest Complex (Thrips, Jassids, Aphids, Whiteflies)",
+    "content": "[C. Cotton Sucking Pest Complex (Thrips, Jassids, Aphids, Whiteflies)]\n- **Symptoms**:\n  - Jassids / Leafhoppers (Amrasca biguttula): Yellowing and downward curling of leaf margins (\"hopper burn\").\n  - Thrips: Silvery patches on lower leaf surface, curling upward of leaf margins.\n  - Whiteflies (Bemisia tabaci): Chlorosis, honeydew excretion causing sooty mold, vector for Cotton Leaf Curl Virus (CLCuV).\n- **Integrated Management**:\n  - Seed treatment with Imidacloprid 70% WS @ 5 g/kg seed.\n  - Install yellow and blue sticky traps @ 15-20 traps/acre.\n  - Encourage natural predators: Ladybird beetles, Chrysoperla.\n  - Chemical spray (Economic Threshold Level ETL reached): Flonicamid 50% WG @ 0.3 g/L or Diafenthiuron 50% WP @ 1.0 g/L or Dinotefuran 20% SG @ 0.4 g/L.",
+    "word_count": 106
+  },
+  {
+    "source": "maize_icar_iihr_guidelines.md",
+    "header": "1. Overview & Agro-Climatic Requirements",
+    "content": "[1. Overview & Agro-Climatic Requirements]\n- **Institution**: ICAR - Indian Institute of Maize Research (IIMR) & UAS Dharwad / Bengaluru.\n- **Key Karnataka Hybrids**: Deccan 101, Deccan 103, Hema (NAH-1137), Nithyashree (NAH-2049), CP-818, Kargil 900M, Pioneer 3396.\n- **Soil & pH**: Deep, well-drained fertile loam to silt loam soils rich in organic matter. Sensitive to water stagnation. Optimal pH: 6.0 to 7.5.\n- **Climate & Temperature**: Warm-weather crop. Optimum germination temp 20°C - 24°C, growth temp 24°C - 32°C. Water requirement 500-650 mm.\n- **Fertilizer Dose (Karnataka standard)**: 150:75:40 kg N:P2O5:K2O per hectare. 1/3rd N + full P & K as basal; 1/3rd N at knee-high stage (30 DAS); 1/3rd N at tasseling stage.",
+    "word_count": 109
+  },
+  {
+    "source": "maize_icar_iihr_guidelines.md",
+    "header": "A. Common Rust (Puccinia sorghi)",
+    "content": "[A. Common Rust (Puccinia sorghi)]\n- **Symptoms**: Small, powdery, circular to elongate golden-brown to cinnamon-brown pustules appearing on both upper and lower leaf surfaces. Later in the season, pustules turn brownish-black as teliospores form. Leaves turn chlorotic and desiccate prematurely under heavy infection.\n- **Favorable Weather**: Cool temperatures (16°C - 24°C) with high relative humidity (>95%) and persistent morning dew, especially in late Kharif or Rabi plantings.\n- **Management**:\n  - Plant tolerant hybrids such as Hema or Deccan 103.\n  - At first appearance of pustules: Spray Mancozeb 75% WP @ 2.5 g/L or Azoxystrobin 18.2% + Difenoconazole 11.4% SC @ 1.0 ml/L. Repeat after 15 days if rust pressure persists.",
+    "word_count": 105
+  },
+  {
+    "source": "maize_icar_iihr_guidelines.md",
+    "header": "B. Turcicum Leaf Blight / Northern Leaf Blight (Exserohilum turcicum)",
+    "content": "[B. Turcicum Leaf Blight / Northern Leaf Blight (Exserohilum turcicum)]\n- **Symptoms**: Long, elliptical, spindle-shaped greyish-green to tan lesions (2.5 to 15 cm long) with distinct margins. Under humid conditions, dark grey olivaceous spores cover lesions. Coalescing lesions cause extensive blighting (\"fired\" look).\n- **Favorable Weather**: Moderate temperature (18°C - 27°C) accompanied by heavy dew and overcast rainy skies.\n- **Management**:\n  - Seed treatment: Metalaxyl + Mancozeb (Apron XL) @ 2 g/kg seed.\n  - Foliar spray: Mancozeb 75% WP @ 2.5 g/L or Hexaconazole 5% EC @ 2 ml/L or Propiconazole 25% EC @ 1 ml/L at initiation of lower leaf lesions.",
+    "word_count": 92
+  },
+  {
+    "source": "maize_icar_iihr_guidelines.md",
+    "header": "C. Fall Armyworm (FAW - Spodoptera frugiperda)",
+    "content": "[C. Fall Armyworm (FAW - Spodoptera frugiperda)]\n- **Significance**: Major invasive destructive pest causing severe defoliation and ear damage across Karnataka maize tracts.\n- **Symptoms**: Ragged leaf feeding holes, skeletonized whorl leaves filled with sawdust-like frass; central growing whorl chewed off (\"dead heart\").\n- **Integrated Management**:\n  - Deep summer ploughing to expose pupae to birds and sunlight.\n  - Seed treatment with Cyantraniliprole 19.8% + Thiamethoxam 19.8% FS @ 6 ml/kg seed (protects crop for first 20 days).\n  - Install FAW pheromone traps @ 5-6 traps/acre.\n  - Early whorl application (15-25 DAS): Spray *Bacillus thuringiensis* (Bt) @ 2 g/L or *Metarhizium anisopliae* @ 5 g/L.\n  - Chemical intervention (if >10% whorls infested): Spray Chlorantraniliprole 18.5% SC @ 0.4 ml/L or Spinetoram 11.7% SC @ 0.5 ml/L directed into leaf whorls.",
+    "word_count": 122
+  },
+  {
+    "source": "paddy_rice_icar_karnataka_guidelines.md",
+    "header": "1. Overview & Agro-Climatic Requirements",
+    "content": "[1. Overview & Agro-Climatic Requirements]\n- **Institution**: ICAR - National Rice Research Institute (NRRI) & University of Agricultural Sciences (UAS) Bengaluru & Dharwad.\n- **Key Karnataka Varieties**:\n  - Irrigated/Wetland: Jaya, Jyothi, MTU-1010, BPT-5204 (Samba Mahsuri), IR-64, KMP-101 (Thanu), BR-2655.\n  - Rainfed/Upland: Dhiren, Sahbhagi Dhan, Intan.\n- **Soil & pH**: Clayey to clay loam soils with high water holding capacity. Optimal pH: 5.5 to 7.0. Can tolerate moderate salinity up to EC 4.0 dS/m.\n- **Climate & Rainfall**: Warm, humid climate. Optimum temperature 22°C to 32°C. Annual water requirement 1100-1400 mm.\n- **Fertilizer Recommendation (NPK for Karnataka)**:\n  - High yielding varieties: 100:50:50 kg N:P2O5:K2O per hectare.\n  - Split application of Nitrogen: 50% at basal, 25% at tillering (20-25 DAT), 25% at panicle initiation. Apply Zinc Sulphate @ 25 kg/ha basal.",
+    "word_count": 124
+  },
+  {
+    "source": "paddy_rice_icar_karnataka_guidelines.md",
+    "header": "A. Rice Blast (Magnaporthe oryzae / Pyricularia oryzae)",
+    "content": "[A. Rice Blast (Magnaporthe oryzae / Pyricularia oryzae)]\n- **Symptoms**:\n  - Leaf Blast: Spindle-shaped or eye-shaped spots with grey or whitish centers and brown/reddish margins. Spots enlarge and coalesce, causing entire leaves to wither and dry.\n  - Neck Blast: Brown to black lesion encircling the panicle base/neck node; panicles break and hang down, producing chaffy unfilled grains.\n- **Favorable Weather**: Relative humidity >90%, dew formation, night temperatures between 18°C - 24°C, excess nitrogenous fertilization.\n- **Cultural Practices**:\n  - Avoid excessive nitrogen fertilizer. Split nitrogen into 3-4 doses.\n  - Treat seeds before sowing with Tricyclazole 75% WP @ 2 g/kg or *Pseudomonas fluorescens* @ 10 g/kg seed.\n- **Chemical Control**:\n  - Spray Tricyclazole 75% WP (Beam) @ 0.6 g/L water, or Isoprothiolane 40% EC @ 1.5 ml/L, or Kasugamycin 3% SL @ 2.5 ml/L.\n  - In severe neck blast risk areas, apply preventive spray at heading stage.",
+    "word_count": 138
+  },
+  {
+    "source": "paddy_rice_icar_karnataka_guidelines.md",
+    "header": "B. Bacterial Leaf Blight (BLB - Xanthomonas oryzae pv. oryzae)",
+    "content": "[B. Bacterial Leaf Blight (BLB - Xanthomonas oryzae pv. oryzae)]\n- **Symptoms**: Water-soaked stripes starting from leaf tips and margins, expanding into wavy, yellowish-white lesions running parallel to veins. Tiny amber droplets of bacterial ooze appear on young lesions in early morning. \"Kresek\" (seedling wilt) stage causes complete seedling drying.\n- **Favorable Weather**: Heavy rainfall, strong winds during monsoon, high humidity, water stagnation.\n- **Management**:\n  - Drain excess field water temporarily.\n  - Avoid top dressing nitrogen during disease flare-up; apply additional Muriate of Potash (MOP) @ 25 kg/ha to improve plant immunity.\n  - Spray Copper Hydroxide 53.8% DF @ 2.0 g/L or Copper Oxychloride 50% WP @ 2.5 g/L mixed with Streptocycline @ 0.1 g/L (1 g in 10 L water).",
+    "word_count": 111
+  },
+  {
+    "source": "paddy_rice_icar_karnataka_guidelines.md",
+    "header": "C. Rice Sheath Blight (Rhizoctonia solani)",
+    "content": "[C. Rice Sheath Blight (Rhizoctonia solani)]\n- **Symptoms**: Oval or irregular greenish-grey water-soaked spots on leaf sheaths near water line. Spots enlarge with dark brown boundaries and greyish white center (\"snake skin\" pattern). Lesions spread up to flag leaf.\n- **Management**:\n  - Deep summer ploughing and destruction of infected stubble.\n  - Foliar spray of Hexaconazole 5% SC @ 2.0 ml/L or Validamycin 3% L @ 2.0 ml/L or Propiconazole 25% EC (Tilt) @ 1.0 ml/L.",
+    "word_count": 69
+  },
+  {
+    "source": "paddy_rice_icar_karnataka_guidelines.md",
+    "header": "D. Brown Plant Hopper (BPH - Nilaparvata lugens)",
+    "content": "[D. Brown Plant Hopper (BPH - Nilaparvata lugens)]\n- **Symptoms**: Both nymphs and adults suck sap from leaf sheath bases. Plants turn yellow, dry up rapidly and lodge in circular patches known as \"Hopper Burn\".\n- **Management**:\n  - Provide \"Alley ways\" (skip one row after every 8-10 rows) for light penetration and air movement.\n  - Alternate wetting and drying (AWD) water management.\n  - Spray Pymetrozine 50% WG @ 0.6 g/L or Triflumezopyrim 10% SC @ 0.48 ml/L or Dinotefuran 20% SG @ 0.4 g/L directed at stem bases.",
+    "word_count": 80
+  },
+  {
+    "source": "ragi_finger_millet_uas_guidelines.md",
+    "header": "1. Overview & Agro-Climatic Requirements",
+    "content": "[1. Overview & Agro-Climatic Requirements]\n- **Institution**: University of Agricultural Sciences (UAS), Bengaluru & Mandya/Mysuru Dry Farming Stations.\n- **Key Karnataka Varieties**:\n  - High Yielding & Blast Resistant: GPU-28, ML-365 (drought tolerant, blast resistant), KMR-301, GPU-48, Indaf-8, Indaf-9, MR-1, MR-6.\n- **Soil & Climate**:\n  - Red loamy, sandy loam, lateritic soils with good internal drainage.\n  - Soil pH: 5.5 to 7.5.\n  - Temperature: 22°C to 30°C. Thrives under 600-900 mm rainfall, highly drought hardy with C4 carbon fixation pathway.\n- **Sowing Window**:\n  - Kharif rainfed: July 1st to July 25th.\n  - Late Kharif: up to August 15th (using short duration varieties like GPU-48 or ML-365).\n  - Seed rate: Drilling/Broadcasting 10-12 kg/ha; Transplanting 5 kg/ha.",
+    "word_count": 109
+  },
+  {
+    "source": "ragi_finger_millet_uas_guidelines.md",
+    "header": "A. Ragi Blast (Pyricularia grisea)",
+    "content": "[A. Ragi Blast (Pyricularia grisea)]\n- **Significance**: Most destructive disease of finger millet in Karnataka, affecting leaf, neck, and finger stages.\n- **Symptoms**:\n  - Leaf Blast: Diamond/spindle shaped lesions with grey ash center and reddish-brown borders on seedlings and leaves.\n  - Neck Blast: Inverted dark brown to black ring at the junction below earhead panicle; earhead turns premature white and lodges.\n  - Finger Blast: Dark brown infection on individual fingers of earhead, inhibiting grain filling and leading to shrivelled grains.\n- **Favorable Weather**: Continuous cloudy weather, drizzle, high relative humidity (>85%), temperatures between 20°C - 26°C.\n- **Cultural & Preventive**:\n  - Cultivate resistant cultivars: GPU-28, ML-365, or KMR-301.\n  - Seed Treatment: Treat seeds with Carbendazim 50% WP @ 2.0 g/kg or *Pseudomonas fluorescens* @ 10 g/kg seed before sowing.\n- **Chemical Control**:\n  - At first appearance of leaf blast: Spray Mancozeb 75% WP @ 2.0 g/L or Tricyclazole 75% WP @ 0.6 g/L.\n  - Protect earhead (neck/finger blast): Crucial single spray at 50% earhead emergence with Kitazin (IBP) 48% EC @ 1.0 ml/L or Tricyclazole 75% WP @ 0.6 g/L.",
+    "word_count": 175
+  },
+  {
+    "source": "ragi_finger_millet_uas_guidelines.md",
+    "header": "B. Foot Rot / Seedling Blight (Sclerotium rolfsii / Helminthosporium nodulosum)",
+    "content": "[B. Foot Rot / Seedling Blight (Sclerotium rolfsii / Helminthosporium nodulosum)]\n- **Symptoms**: Brown lesions on basal sheath near soil line, rotting of seedlings, white cottony mycelium at collar region, damping-off patches in nursery.\n- **Management**:\n  - Seed treatment with *Trichoderma harzianum* @ 5 g/kg seed.\n  - Soil solarization and avoid waterlogging. Drench soil patch with Carbendazim 50% WP @ 1 g/L or Copper Oxychloride @ 2.5 g/L.",
+    "word_count": 57
+  },
+  {
+    "source": "ragi_finger_millet_uas_guidelines.md",
+    "header": "C. Major Pests of Ragi",
+    "content": "[C. Major Pests of Ragi]\n- **Ragi Stem Borer (Sesamia inferens)**: Larvae bore into central shoot causing \"dead heart\" in vegetative phase and white earhead in flowering stage.\n  - Control: Apply Cartap Hydrochloride 4G granules @ 8 kg/acre or spray Chlorantraniliprole 18.5% SC @ 0.3 ml/L.\n- **Ragi Earhead Caterpillar**: Caterpillars feed on milk-stage grain within earheads.\n  - Control: Dust Quinalphos 1.5% DP @ 10 kg/acre or spray Novaluron 10% EC @ 1.0 ml/L at grain formation.",
+    "word_count": 72
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "1. Overview & Agro-Climatic Requirements",
+    "content": "[1. Overview & Agro-Climatic Requirements]\n- **Institution**: ICAR - Indian Institute of Horticultural Research (IIHR), Bengaluru & UAS Bengaluru / Raitha Mitra.\n- **Recommended Varieties & Hybrids**: Arka Rakshak (triple disease resistant to ToLCV, BW, Early Blight), Arka Samrat, Arka Vikas, Arka Abhed.\n- **Optimal Soil**: Well-drained sandy loam or clay loam, rich in organic matter.\n- **Soil pH**: 6.0 to 7.0. EC < 1.0 dS/m.\n- **Temperature & Climate**: 21°C to 28°C during vegetative stage; daytime 24°C-30°C, nighttime 16°C-20°C for fruit set. Extreme heat (>35°C) causes flower drop.\n- **Water Management**: Drip irrigation recommended; water requirement 400-600 mm throughout crop lifecycle. Avoid wetting foliage during flowering/fruiting to prevent fungal foliar blights.",
+    "word_count": 107
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "A. Tomato Early Blight (Alternaria solani)",
+    "content": "[A. Tomato Early Blight (Alternaria solani)]\n- **Symptoms**: Concentric brown-to-black ring spots (\"target board\" pattern) appearing first on older lower leaves. Leaves turn yellow around spots, dry out, and drop prematurely (defoliation).\n- **Favorable Weather**: Warm temperatures (24°C - 30°C) with intermittent rain and high relative humidity (>80%).\n- **Cultural & Preventive**:\n  - Maintain 60 cm x 45 cm or 90 cm x 60 cm spacing for aeration.\n  - Stake plants with bamboo poles to prevent leaves touching wet soil.\n  - Remove and burn infected lower leaves up to 30 cm from ground.\n- **Organic & Biological Control**:\n  - Spray *Pseudomonas fluorescens* or *Bacillus subtilis* @ 5 g/L or 10 ml/L at transplanting and 30 DAT.\n  - Foliar spray of 5% Neem Seed Kernel Extract (NSKE) or Cold-pressed Neem Oil (10,000 ppm) @ 3 ml/L.\n- **Chemical Control (CIBRC Approved Dosages)**:\n  - Preventive / Initial symptoms: Mancozeb 75% WP @ 2.0 - 2.5 g/L or Chlorothalonil 75% WP @ 2.0 g/L.\n  - Curative / Severe infection: Azoxystrobin 18.2% + Difenoconazole 11.4% SC @ 1.0 ml/L, or Tebuconazole 25.9% EC @ 1.0 ml/L.\n  - Spray volume: 500 L/ha. Wait period (PHI): 5-7 days before harvest.",
+    "word_count": 188
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "B. Tomato Late Blight (Phytophthora infestans)",
+    "content": "[B. Tomato Late Blight (Phytophthora infestans)]\n- **Symptoms**: Water-soaked dark green/black lesions on leaf margins and tips. Under moist morning conditions, white downy fungal mildew appears on leaf undersides. Stems show purplish-brown lesions; fruits develop large, greasy brown firm lesions.\n- **Favorable Weather**: Cool temperatures (13°C - 21°C) with prolonged cloud cover, fog, and relative humidity >90%.\n- **Cultural Practices**:\n  - Avoid night irrigation and overhead sprinklers. Ensure ridge planting with proper soil drainage.\n- **Chemical Control**:\n  - Prophylactic: Copper Oxychloride 50% WP @ 2.5 g/L or Mancozeb 75% WP @ 2.5 g/L.\n  - Systemic curative: Metalaxyl 8% + Mancozeb 64% WP (Ridomil Gold) @ 2.5 g/L, or Cymoxanil 8% + Mancozeb 64% WP @ 2.0 g/L, or Dimethomorph 50% WP @ 1.0 g/L.",
+    "word_count": 118
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "C. Tomato Yellow Leaf Curl Virus (ToLCV) & Whitefly Vector",
+    "content": "[C. Tomato Yellow Leaf Curl Virus (ToLCV) & Whitefly Vector]\n- **Symptoms**: Severe stunting, upward curling and cupping of leaflets, marginal chlorosis (yellowing), puckering, and bushy appearance. Flowers fail to develop; severe yield loss if infected before flowering.\n- **Vector**: Bemisia tabaci (Silverleaf Whitefly).\n- **Management Strategy**:\n  - Grow resistant hybrids like Arka Rakshak or Arka Abhed.\n  - Use 40-mesh nylon insect-proof net in nursery beds for first 25-30 days.\n  - Install yellow sticky traps @ 20-25 traps per acre at 1 foot above canopy level.\n  - Vector control: Spray Imidacloprid 17.8% SL @ 0.5 ml/L or Thiamethoxam 25% WG @ 0.3 g/L or Acetamiprid 20% SP @ 0.4 g/L. Alternate with neem oil 3 ml/L to prevent pesticide resistance.",
+    "word_count": 110
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "D. Bacterial Wilt (Ralstonia solanacearum)",
+    "content": "[D. Bacterial Wilt (Ralstonia solanacearum)]\n- **Symptoms**: Rapid daytime wilting of plant while foliage retains green color (green wilt). Stem cross-section placed in water emits white bacterial ooze streams.\n- **Management**:\n  - Soil solarization in nursery. Apply bleaching powder @ 10 kg/acre before planting.\n  - Crop rotation with non-solanaceous crops (maize, ragi, pulses) for 2-3 years.\n  - Drench root zone with Copper Hydroxide 77% WP @ 2.0 g/L + Streptocycline (Streptomycin sulphate + Tetracycline) @ 0.1 g/L (1 g in 10 L water).",
+    "word_count": 78
+  },
+  {
+    "source": "tomato_icar_iihr_guidelines.md",
+    "header": "E. Tomato Fruit Borer (Helicoverpa armigera)",
+    "content": "[E. Tomato Fruit Borer (Helicoverpa armigera)]\n- **Symptoms**: Circular bore holes on green and ripe fruits, often with caterpillar half inside fruit.\n- **Management**:\n  - Plant African Marigold as trap crop (1 row of marigold for every 16 rows of tomato).\n  - Install Helilure pheromone traps @ 5-8 traps/acre.\n  - Spray HaNPV @ 250 LE/ha or Bacillus thuringiensis (Bt) @ 2 g/L.\n  - Chemical spray: Chlorantraniliprole 18.5% SC (Coragen) @ 0.3 ml/L or Flubendiamide 39.35% SC @ 0.3 ml/L. PHI: 3 days.",
+    "word_count": 76
+  }
+]

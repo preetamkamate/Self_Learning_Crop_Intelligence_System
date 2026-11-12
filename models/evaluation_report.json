@@ -1,0 +1,233 @@
+{
+  "evaluation_timestamp": "2026-11-12 09:29:47",
+  "hardware_environment": {
+    "device": "mps",
+    "platform": "darwin"
+  },
+  "tabular_crop_recommendation": {
+    "dataset_name": "Indian Agriculture Crop Recommendation Dataset",
+    "total_samples": 2200,
+    "test_samples": 440,
+    "num_classes": 22,
+    "test_accuracy_pct": 99.55,
+    "macro_precision": 0.9957,
+    "macro_recall": 0.9955,
+    "macro_f1": 0.9955,
+    "cv_5fold_mean_pct": 99.59,
+    "cv_5fold_std_pct": 0.27,
+    "avg_inference_latency_ms": 14.11
+  },
+  "computer_vision_and_ood": {
+    "backbone_model": "facebook/dinov2-small",
+    "pathology_classifier": "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification",
+    "in_distribution_samples": 15,
+    "top1_accuracy_pct": 100.0,
+    "top3_accuracy_pct": 100.0,
+    "mean_confidence_pct": 76.82,
+    "mean_shannon_entropy": 0.7232,
+    "ood_samples_evaluated": 6,
+    "ood_rejection_rate_pct": 100.0,
+    "avg_multiscale_latency_ms": 94.38,
+    "sample_evaluations": [
+      {
+        "file": "Apple___Apple_scab.jpg",
+        "ground_truth": "Apple Scab",
+        "predicted_top1": "Apple Scab",
+        "top1_match": true,
+        "top3_match": true,
+        "confidence": 83.86,
+        "entropy": 0.5782,
+        "status": "confident"
+      },
+      {
+        "file": "Apple___Black_rot.jpg",
+        "ground_truth": "Apple with Black Rot",
+        "predicted_top1": "Apple with Black Rot",
+        "top1_match": true,
+        "top3_match": true,
+        "confidence": 37.36,
+        "entropy": 2.007,
+        "status": "uncertain"
+      },
+      {
+        "file": "Apple___Cedar_apple_rust.jpg",
+        "ground_truth": "Cedar Apple Rust",
+        "predicted_top1": "Cedar Apple Rust",
+        "top1_match": true,
+        "top3_match": true,
+        "confidence": 99.43,
+        "entropy": 0.0453,
+        "status": "confident"
+      },
+      {
+        "file": "Apple___healthy.jpg",
+        "ground_truth": "Healthy Apple",
+        "predicted_top1": "Healthy Apple",
+        "top1_match": true,
+        "top3_match": true,
+        "confidence": 65.01,
+        "entropy": 0.8463,
+        "status": "confident"
+      },
+      {
+        "file": "Corn_(maize)___Common_rust_.jpg",
+        "ground_truth": "Corn (Maize) with Common Rust",
+        "predicted_top1": "Corn (Maize) with Common Rust",
+        "top1_match": true,
+        "top3_match": true,
+        "confidence": 96.55,
+        "entropy": 0.1819,
+        "status": "confident"
+      }
+    ],
+    "ood_evaluations": [
+      {
+        "file": "ood_cat.png",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.0928,
+        "is_rejected": true
+      },
+      {
+        "file": "ood_gradient.jpg",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.0142,
+        "is_rejected": true
+      },
+      {
+        "file": "ood_gaussian_noise.jpg",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.1046,
+        "is_rejected": true
+      },
+      {
+        "file": "ood_noise.jpg",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.067,
+        "is_rejected": true
+      },
+      {
+        "file": "ood_checkerboard.jpg",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.0627,
+        "is_rejected": true
+      },
+      {
+        "file": "ood_dark_blank.jpg",
+        "status": "out_of_distribution",
+        "dinov2_similarity": 0.1279,
+        "is_rejected": true
+      }
+    ]
+  },
+  "rag_knowledge_retrieval": {
+    "index_type": "FAISS IndexFlatIP (Cosine Similarity)",
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "total_queries_evaluated": 10,
+    "hit1_accuracy_pct": 100.0,
+    "hit3_recall_pct": 100.0,
+    "mean_reciprocal_rank_mrr": 1.0,
+    "avg_retrieval_latency_ms": 109.82,
+    "query_evaluations": [
+      {
+        "query": "How to identify and control early blight in tomato?",
+        "topic": "Tomato Early Blight",
+        "expected_source": "tomato_icar_iihr_guidelines.md",
+        "top1_source": "tomato_icar_iihr_guidelines.md",
+        "top1_score": 0.6779,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "What are the recommended chemical dosages for tomato late blight?",
+        "topic": "Tomato Late Blight",
+        "expected_source": "tomato_icar_iihr_guidelines.md",
+        "top1_source": "tomato_icar_iihr_guidelines.md",
+        "top1_score": 0.5834,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "How to manage rice blast disease in paddy fields?",
+        "topic": "Paddy Rice Blast",
+        "expected_source": "paddy_rice_icar_karnataka_guidelines.md",
+        "top1_source": "paddy_rice_icar_karnataka_guidelines.md",
+        "top1_score": 0.5633,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "What causes bacterial leaf blight in rice and how to control kresek stage?",
+        "topic": "Paddy Bacterial Leaf Blight",
+        "expected_source": "paddy_rice_icar_karnataka_guidelines.md",
+        "top1_source": "paddy_rice_icar_karnataka_guidelines.md",
+        "top1_score": 0.5948,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "Which varieties of ragi are resistant to finger blast in Karnataka?",
+        "topic": "Ragi Finger Blast",
+        "expected_source": "ragi_finger_millet_uas_guidelines.md",
+        "top1_source": "ragi_finger_millet_uas_guidelines.md",
+        "top1_score": 0.65,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "How to treat foot rot and damping off in finger millet seedlings?",
+        "topic": "Ragi Foot Rot",
+        "expected_source": "ragi_finger_millet_uas_guidelines.md",
+        "top1_source": "ragi_finger_millet_uas_guidelines.md",
+        "top1_score": 0.5987,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "What is the ICAR recommendation for Fall Armyworm management in maize?",
+        "topic": "Maize Fall Armyworm",
+        "expected_source": "maize_icar_iihr_guidelines.md",
+        "top1_source": "maize_icar_iihr_guidelines.md",
+        "top1_score": 0.5947,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "Symptoms and fungicide treatment for common rust in corn",
+        "topic": "Maize Common Rust",
+        "expected_source": "maize_icar_iihr_guidelines.md",
+        "top1_source": "maize_icar_iihr_guidelines.md",
+        "top1_score": 0.5333,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "How to control bacterial blight and black arm in cotton?",
+        "topic": "Cotton Black Arm Blight",
+        "expected_source": "cotton_icar_uas_guidelines.md",
+        "top1_source": "cotton_icar_uas_guidelines.md",
+        "top1_score": 0.5011,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      },
+      {
+        "query": "Integrated management of cotton sucking pest complex whitefly and thrips",
+        "topic": "Cotton Sucking Pests",
+        "expected_source": "cotton_icar_uas_guidelines.md",
+        "top1_source": "cotton_icar_uas_guidelines.md",
+        "top1_score": 0.701,
+        "hit1": true,
+        "hit3": true,
+        "reciprocal_rank": 1.0
+      }
+    ]
+  }
+}
