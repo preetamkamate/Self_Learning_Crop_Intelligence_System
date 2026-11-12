@@ -85,20 +85,24 @@ class AutonomousRouter:
         # Strict Intent Classification
         # ----------------------------------------------------------------------
 
-        # Tabular Crop Recommendation: User explicitly asks what to grow/plant
+        # Tabular Crop Recommendation: User asks what to grow/plant (including natural questions)
+        # CHANGED: Robust regex patterns covering conversational crop queries
         crop_rec_patterns = [
-            r"what\s+(crop|crops)\s+should\s+i\s+(grow|plant|sow)",
-            r"what\s+to\s+(grow|plant|sow)",
-            r"which\s+(crop|crops)\s+(to|should|can)\s+(grow|plant|sow)",
-            r"recommend\s+(a\s+)?(crop|crops)",
-            r"crop\s+recommendation",
-            r"crop\s+suitability",
-            r"suitable\s+crops?",
-            r"best\s+crop\s+for",
-            r"suggest\s+(a\s+)?crop",
+            r"\b(which|what)\s+(crop|crops)\b",
+            r"\bwhat\s+(should\s+i|to|can\s+i)?\s*(grow|plant|sow|cultivate)\b",
+            r"\bwhich\s+.*(grow|plant|sow|cultivate)\b",
+            r"\b(grow|plant|sow|cultivate)\s+(some|any|which|what)?\s*(crop|crops|now)\b",
+            r"\b(suggest|recommend|inform|tell|give|show|advise)\b.*?\b(crop|crops|cultivation|growing)\b",
+            r"\b(crop|crops)\s+(recommendation|suitability|advice|suggestion|choice|options?)\b",
+            r"\bsuitable\s+(crop|crops)\b",
+            r"\bbest\s+(crop|crops)\b",
+            r"\bwhat\s+to\s+plant\b",
+            r"\bwhat\s+to\s+grow\b",
+            r"\bcrop\s+to\s+(grow|plant)\b",
             r"ಯಾವ\s+ಬೆಳೆ",
             r"ಬೆಳೆ\s+ಶಿಫಾರಸು",
             r"ಯಾವ\s+ಬೆಳೆ\s+ಬೆಳೆಯಬೇಕು",
+            r"ಬೆಳೆ\s+ಆಯ್ಕೆ",
         ]
         wants_crop_rec = any(re.search(pat, text_lower) for pat in crop_rec_patterns)
 
@@ -193,19 +197,32 @@ class AutonomousRouter:
                 district_or_city=state.profile.district
             )
 
-        # 4. Tabular Crop ML: Run ONLY when explicitly asked to recommend crops
+        # 4. Tabular Crop ML: Run when user asks what crops to grow/plant
         if wants_crop_rec and not has_new_image:
-            logging.info("AutonomousRouter: Running Tabular ML (User explicitly requested crop recommendation)...")
+            logging.info("AutonomousRouter: Running Tabular Crop Pipeline for %s...", state.profile.district)
+            
+            # CHANGED: Automatically fetch live district weather to provide real environmental values
+            if not weather_result:
+                weather_result = self.weather_service.get_weather(
+                    district_or_city=state.profile.district
+                )
+                if "Live Weather API (Open-Meteo)" not in modules_run:
+                    modules_run.append("Live Weather API (Open-Meteo)")
+
+            temp_val = weather_result.get("temperature_c", 26.0) if weather_result else 26.0
+            hum_val = weather_result.get("humidity_pct", 70.0) if weather_result else 70.0
+            rainfall_val = 150.0  # Seasonal baseline for semi-arid / Northern Dry Zone (e.g. Belagavi)
+
             modules_run.append("Tabular ML (RandomForest Suitability)")
             tabular_result = self.tabular_predictor.predict(
                 n=state.profile.soil_n,
                 p=state.profile.soil_p,
                 k=state.profile.soil_k,
-                temp=26.0,
-                humidity=70.0,
+                temp=temp_val,
+                humidity=hum_val,
                 ph=state.profile.soil_ph,
-                rainfall=200.0,
-                top_k=3,
+                rainfall=rainfall_val,
+                top_k=5,
             )
 
         # 5. RAG Retrieval Module: Retrieve specific agronomic guidelines
@@ -229,7 +246,8 @@ class AutonomousRouter:
         elif is_followup and vision_result and vision_result.get("status") == "confident":
             rag_query = f"{vision_result['top1_label']} {user_text} ICAR dosage treatment"
         elif wants_crop_rec and tabular_result:
-            rag_query = f"{tabular_result['top_crop']} cultivation practices soil requirement ICAR"
+            # CHANGED: Retrieve crop-specific agronomic practices tailored to district and agro-climatic zone
+            rag_query = f"{tabular_result['top_crop']} cultivation practices soil climate ICAR {state.profile.district}"
         elif wants_disease:
             rag_query = user_text
 

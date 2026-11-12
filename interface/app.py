@@ -251,6 +251,15 @@ for idx, msg in enumerate(st.session_state.messages):
         telemetry = msg.get("telemetry")
         if telemetry:
             with st.expander("🔍 Diagnostic & Model Reasoning (NHCE Mini-Project Telemetry)"):
+                # CHANGED: Prominently show live LLM execution status in telemetry expander
+                llm_status = telemetry.get("llm_status", "Gemini API Active")
+                status_class = "badge-confident" if "Active" in llm_status else "badge-ood"
+                st.markdown(
+                    f'<div style="margin-bottom:8px;">'
+                    f'<span class="metric-badge {status_class}">🤖 LLM Status: {llm_status}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
                 mod_badges = "".join(
                     [f'<span class="metric-badge badge-module">⚙️ {m}</span>' for m in telemetry.get("modules_run", [])]
                 )
@@ -473,6 +482,8 @@ if should_run_turn:
             router_payload=telemetry,
             language=active_lang,
         )
+        # CHANGED: Capture live LLM execution status in telemetry payload
+        telemetry["llm_status"] = advisories.get("llm_status", getattr(synthesis_service, "last_llm_status", "Gemini API Active"))
 
         # Log to Responsible Self-Learning Queue
         input_type = "multimodal" if is_new_image else ("tabular" if telemetry.get("tabular_result") else "text_rag")

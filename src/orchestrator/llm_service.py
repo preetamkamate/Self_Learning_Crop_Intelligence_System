@@ -41,14 +41,19 @@ class AdvisorySynthesisService:
 
     def __init__(self):
         # CHANGED: Initialize GenAI Client and candidate models
-        self.api_key = config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "").strip()
-        self.model_name = config.GEMINI_MODEL or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        self.last_llm_status = "Initializing..."
+        self._init_client()
+
+    def _init_client(self):
+        # CHANGED: Dynamically reload .env to ensure fresh API keys are read immediately
+        load_dotenv(ROOT_DIR / ".env", override=True)
+        self.api_key = os.getenv("GEMINI_API_KEY", "").strip() or config.GEMINI_API_KEY
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or config.GEMINI_MODEL
         self.candidate_models = [
             self.model_name,
             "gemini-3.5-flash-lite",
             "gemini-3.8-flash",
             "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
         ]
@@ -57,18 +62,24 @@ class AdvisorySynthesisService:
         if GENAI_AVAILABLE and self.api_key:
             try:
                 self.client = genai.Client(api_key=self.api_key)
+                self.last_llm_status = f"Gemini API Active ({self.model_name})"
                 logging.info(
                     "AdvisorySynthesisService: Google GenAI Client initialized successfully (primary model: '%s').",
                     self.model_name,
                 )
             except Exception as e:
+                self.client = None
+                self.last_llm_status = f"Client Init Failed ({e})"
                 logging.warning(
                     "AdvisorySynthesisService: Failed to initialize Google GenAI Client: %s. Using local fallback.",
                     e,
                 )
         else:
+            self.client = None
             if not self.api_key:
-                logging.info("AdvisorySynthesisService: GEMINI_API_KEY not set. Using local rule-based synthesis fallback.")
+                self.last_llm_status = "Local Fallback (GEMINI_API_KEY not set)"
+            else:
+                self.last_llm_status = "Local Fallback (google-genai unavailable)"
 
     def _build_system_instruction(self) -> str:
         """
@@ -262,17 +273,21 @@ class AdvisorySynthesisService:
                         kn_text = fallback["kn"]
 
                     if en_text:
+                        self.last_llm_status = f"Gemini API Active ({model})"
                         logging.info("AdvisorySynthesisService: Successfully generated advisory via Gemini ('%s').", model)
                         return {
                             "en": en_text,
                             "kn": kn_text,
                             "chosen_response": kn_text if language == "kn" else en_text,
+                            "llm_status": self.last_llm_status,
                         }
             except Exception as e:
+                last_err = str(e)
                 logging.warning("AdvisorySynthesisService: Gemini model '%s' failed: %s", model, e)
                 continue
 
-        logging.warning("AdvisorySynthesisService: All Gemini models failed or offline. Falling back to local synthesis.")
+        self.last_llm_status = f"API Error ({last_err[:50]})" if 'last_err' in locals() else "API Offline"
+        logging.warning("AdvisorySynthesisService: All Gemini models failed or offline (%s). Falling back to local synthesis.", self.last_llm_status)
         return None
 
     def _extract_rag_treatments(self, rag_docs: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -519,22 +534,31 @@ class AdvisorySynthesisService:
             )
             return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-        # Case 5: Fallback General Response
+        # Case 5: Contextual Agricultural Guidance (DELETED hardcoded menu completely)
+        # CHANGED: Genuine agricultural advisory based on farmer profile and agro-climatic zone
+        crops_sample = "Maize, Cotton, Sorghum, Chickpea, and Pulses"
+        if tabular:
+            crops_sample = f"**{tabular.get('top_crop', '').title()}** along with {', '.join([r.get('crop', '').title() for r in tabular.get('recommendations', [])[:3]])}"
         en = (
             f"### 🌾 Crop Advisory ({district})\n\n"
-            f"Please specify how I can assist you:\n"
-            f"- **Plant Health**: Upload a plant photo or describe symptoms.\n"
-            f"- **Crop Choice**: Ask what to grow for your soil NPK & district.\n"
-            f"- **Weather Check**: Ask about rainfall and spraying conditions."
+            f"Based on your profile for **{district}** (Soil: N={profile.soil_n if profile else 75}, P={profile.soil_p if profile else 40}, K={profile.soil_k if profile else 42}, pH={profile.soil_ph if profile else 6.8}):\n\n"
+            f"- **Agronomic Recommendation**: {crops_sample} perform reliably under the agro-climatic conditions of {district}.\n"
+            f"- **Soil Health & Moisture**: Apply well-decomposed FYM (5 tonnes/acre) before sowing to enhance organic carbon and water-holding capacity.\n"
+            f"- **Field Management**: Use certified seeds with recommended spacing and conduct regular field scouting for early pest detection."
         )
         kn = (
             f"### 🌾 ಕೃಷಿ ಸಲಹೆಗಾರ ({district})\n\n"
-            f"ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ:\n"
-            f"- **ಬೆಳೆ ರೋಗ**: ಗಿಡದ ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ ಅಥವಾ ರೋಗ ಲಕ್ಷಣ ತಿಳಿಸಿ.\n"
-            f"- **ಬೆಳೆ ಆಯ್ಕೆ**: ನಿಮ್ಮ ಮಣ್ಣಿಗೆ ಯಾವ ಬೆಳೆ ಸೂಕ್ತ ಎಂದು ಕೇಳಿ.\n"
-            f"- **ಹವಾಮಾನ**: ಮಳೆ ಮತ್ತು ಸಿಂಪಡಣಾ ಪರಿಸ್ಥಿತಿ ತಿಳಿಯಿರಿ."
+            f"ನಿಮ್ಮ **{district}** ಪ್ರದೇಶದ ಮಣ್ಣಿನ ಪೋಷಕಾಂಶಗಳ ಆಧಾರದ ಮೇಲೆ (N={profile.soil_n if profile else 75}, P={profile.soil_p if profile else 40}, K={profile.soil_k if profile else 42}, pH={profile.soil_ph if profile else 6.8}):\n\n"
+            f"- **ಶಿಫಾರಸು ಬೆಳೆಗಳು**: {district} ಹವಾಮಾನಕ್ಕೆ ಸೂಕ್ತವಾದ ಬೆಳೆಗಳು: {crops_sample}.\n"
+            f"- **ಮಣ್ಣಿನ ನಿರ್ವಹಣೆ**: ಬಿತ್ತನೆಗೆ ಮುನ್ನ ಸಾಕಷ್ಟು ಸಾವಯವ ಕೊಟ್ಟಿಗೆ ಗೊಬ್ಬರವನ್ನು ಮಣ್ಣಿಗೆ ಸೇರಿಸಿ.\n"
+            f"- **ಮುಂದಿನ ಕ್ರಮ**: ಗುಣಮಟ್ಟದ ಬೀಜೋಪಚಾರ ಮಾಡಿದ ಪ್ರಮಾಣೀಕೃತ ಬೀಜಗಳನ್ನು ಬಳಸಿ ಸೂಕ್ತ ಸಮಯದಲ್ಲಿ ಬಿತ್ತನೆ ಮಾಡಿ."
         )
-        return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
+        return {
+            "en": en,
+            "kn": kn,
+            "chosen_response": kn if language == "kn" else en,
+            "llm_status": getattr(self, "last_llm_status", "Local Fallback Active"),
+        }
 
     def generate_advisory(
         self,
@@ -547,11 +571,17 @@ class AdvisorySynthesisService:
         with an offline rule-based fallback to guarantee stability.
         Word count: 120-180 words.
         """
-        # CHANGED: Attempt real LLM generation via Google GenAI first
+        # CHANGED: Ensure client is dynamically refreshed from environment if not yet ready
+        if not self.client:
+            self._init_client()
+
+        # CHANGED: Force live Gemini LLM generation for ALL queries when client is available
         if self.client:
             llm_res = self._generate_with_gemini(router_payload, language=language)
             if llm_res and llm_res.get("en"):
                 return llm_res
 
         # CHANGED: Seamless local rule-based synthesis fallback
-        return self._local_fallback_synthesis(router_payload, language=language)
+        fallback_res = self._local_fallback_synthesis(router_payload, language=language)
+        fallback_res["llm_status"] = getattr(self, "last_llm_status", "Local Fallback Active")
+        return fallback_res
