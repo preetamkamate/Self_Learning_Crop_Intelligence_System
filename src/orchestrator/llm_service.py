@@ -42,13 +42,13 @@ class AdvisorySynthesisService:
     def __init__(self):
         # CHANGED: Initialize GenAI Client and candidate models
         self.api_key = config.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "").strip()
-        self.model_name = config.GEMINI_MODEL or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = config.GEMINI_MODEL or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         self.candidate_models = [
             self.model_name,
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
-            "gemini-3.8-flash",
-            "gemini-3.5-flash-lite",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
         ]
