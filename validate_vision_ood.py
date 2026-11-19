@@ -72,9 +72,12 @@ def run_validation():
         )
 
         assert not is_ood, f"Plant image '{label}' was wrongly flagged as OOD (sim={sim})!"
-        assert status in ["confident", "uncertain"], f"Plant image '{label}' status was '{status}' instead of confident/uncertain!"
-        assert len(res.get("predictions", [])) > 0, f"Plant image '{label}' had empty disease predictions!"
-        assert len(res.get("refusal_reason_en", "")) == 0 or status == "uncertain", f"Unexpected refusal reason for plant image '{label}'"
+        if "whole-plant" in label.lower() or "canopy" in label.lower():
+            assert status == "unsupported_crop_part", f"Whole-plant image '{label}' status was '{status}' instead of unsupported_crop_part!"
+            assert "not available yet" in res.get("top1_label", "").lower()
+        else:
+            assert status in ["confident", "probable_diagnosis_needs_confirmation", "uncertain_disease"], f"Foliar image '{label}' status was '{status}'!"
+            assert len(res.get("predictions", [])) > 0, f"Foliar image '{label}' had empty disease predictions!"
         plant_passed += 1
 
     print(f"Result: {plant_passed}/{len(plant_test_files)} representative plant images correctly accepted.\n")

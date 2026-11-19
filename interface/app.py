@@ -336,6 +336,15 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.caption("Foliar details are blurred or out of focus. Please hold steady in bright daylight and retake.")
+                        elif status == "unsupported_crop_part":
+                            crop_sp = vision.get("crop_species", "Plant")
+                            p_part = vision.get("plant_part", "part").replace("_", " ").title()
+                            st.markdown(
+                                f'<span class="metric-badge badge-module">🌿 VALID PLANT ({crop_sp} — {p_part})</span>',
+                                unsafe_allow_html=True,
+                            )
+                            st.info("ℹ️ **Valid plant image detected. Disease diagnosis is not available yet for this crop/plant part.**")
+                            st.caption("Training coverage for whole-plant/canopy/stem viewpoints is currently under ingestion and validation. Disease diagnosis requires a foliar close-up.")
                         elif status == "insufficient_evidence":
                             v_part = vision.get("plant_part", "plant part")
                             st.markdown(
@@ -405,18 +414,25 @@ for idx, msg in enumerate(st.session_state.messages):
                                 st.markdown(f"**Exact Decision Rule**: `{dbg.get('decision_rule', 'N/A')}`")
                                 st.markdown(f"**Final Decision State**: `{dbg.get('final_decision', 'N/A')}`")
 
+                                st.markdown(
+                                    f"• **Stage 1 (Validity)**: `{'Valid Plant' if dbg.get('stage1_valid', True) else 'Refused'}` "
+                                    f"(Sharpness: `{dbg.get('blur_metric', 0.0):.1f}`, DINOv2: `{dbg.get('dinov2_similarity', 0.0):.4f}`)\n"
+                                    f"• **Stage 2 (Plant Part)**: `{dbg.get('stage2_plant_part', vision.get('plant_part', 'N/A'))}`\n"
+                                    f"• **Stage 3 (Crop Species)**: `{dbg.get('stage3_crop_species', vision.get('crop_species', 'N/A'))}` "
+                                    f"(Confidence: `{dbg.get('stage3_crop_confidence_pct', 0.0)}%`)\n"
+                                    f"• **Stage 4 (Route Coverage)**: `{'SUPPORTED & DEPLOYED' if dbg.get('stage4_route_supported', False) else 'UNSUPPORTED / NOT DEPLOYED'}`"
+                                )
+
                                 d_col1, d_col2 = st.columns(2)
                                 with d_col1:
                                     st.caption(f"• **Raw Shannon Entropy H(p)**: `{dbg.get('raw_entropy', dbg.get('entropy', 0.0)):.4f}`")
                                     st.caption(f"• **Normalized Entropy Ĥ(p)**: `{dbg.get('norm_entropy', 0.0):.4f}`")
-                                    st.caption(f"• **Class Count (C)**: `{dbg.get('class_count', 38)}` (Max theoretical H = 3.638)")
-                                    st.caption(f"• **Applied Entropy Threshold**: `{dbg.get('entropy_threshold', 2.20):.2f}` (Norm: `{dbg.get('norm_entropy_threshold', 0.605):.3f}`)")
-                                    st.caption(f"• **Quadrant Agreement**: `{dbg.get('quadrant_agreement', 'N/A')}`")
+                                    st.caption(f"• **Crop Subspace Classes**: `{dbg.get('class_count', 38)}`")
+                                    st.caption(f"• **Applied Entropy Threshold**: `{dbg.get('entropy_threshold', 2.20):.2f}`")
                                 with d_col2:
                                     st.caption(f"• **Top-1 Probability**: `{dbg.get('top1_confidence_pct', 0.0):.1f}%` ({dbg.get('predicted_class', 'N/A')})")
                                     st.caption(f"• **DINOv2 Plant Similarity**: `{dbg.get('dinov2_similarity', 0.0):.4f}` (Threshold: `{dbg.get('dinov2_threshold', 0.16):.2f}`)")
                                     st.caption(f"• **Focus Sharpness (Laplacian)**: `{dbg.get('blur_metric', 0.0):.1f}` (Threshold: `{dbg.get('blur_threshold', 40.0):.1f}`)")
-                                    st.caption(f"• **Image Dimensions & Mode**: `{dbg.get('image_dimensions')}` ({dbg.get('image_mode')})")
                                     st.caption(f"• **OOD Gate Result**: `{'OOD (Non-Plant)' if dbg.get('is_ood') else 'In-Distribution (Plant Recognized)'}`")
 
                                 top3 = dbg.get("top3_probabilities", dbg.get("top_probabilities", []))

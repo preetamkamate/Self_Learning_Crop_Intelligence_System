@@ -1,0 +1,347 @@
+{
+  "evaluation_timestamp": "2026-11-19T19:40:00",
+  "staged_architecture": "4-Stage Hierarchical Engine (Validity -> Part -> Crop -> Gated Pathology)",
+  "routes_evaluated": {
+    "Tomato_leaf": {
+      "crop": "Tomato",
+      "plant_part": "leaf",
+      "samples": 5,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "cross_crop_confusion_rate": 0.0,
+      "abstention_rate": 0.0,
+      "deployment_status": "DEPLOYED",
+      "confusion_matrix": [
+        [
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "labels": [
+        "Healthy Tomato Plant",
+        "Tomato Mosaic Virus",
+        "Tomato Yellow Leaf Curl Virus",
+        "Tomato with Bacterial Spot",
+        "Tomato with Early Blight",
+        "Tomato with Late Blight",
+        "Tomato with Leaf Mold",
+        "Tomato with Septoria Leaf Spot",
+        "Tomato with Spider Mites or Two-spotted Spider Mite",
+        "Tomato with Target Spot"
+      ]
+    },
+    "Corn_leaf": {
+      "crop": "Corn (Maize)",
+      "plant_part": "leaf",
+      "samples": 4,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "cross_crop_confusion_rate": 0.0,
+      "abstention_rate": 0.0,
+      "deployment_status": "DEPLOYED",
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          2,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "labels": [
+        "Corn (Maize) with Cercospora and Gray Leaf Spot",
+        "Corn (Maize) with Common Rust",
+        "Corn (Maize) with Northern Leaf Blight",
+        "Healthy Corn (Maize) Plant"
+      ]
+    },
+    "Grape_leaf": {
+      "crop": "Grape",
+      "plant_part": "leaf",
+      "samples": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "cross_crop_confusion_rate": 0.0,
+      "abstention_rate": 0.0,
+      "deployment_status": "DEPLOYED",
+      "confusion_matrix": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "labels": [
+        "Grape with Black Rot",
+        "Grape with Esca (Black Measles)",
+        "Grape with Isariopsis Leaf Spot",
+        "Healthy Grape Plant"
+      ]
+    },
+    "Apple_leaf": {
+      "crop": "Apple",
+      "plant_part": "leaf",
+      "samples": 5,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "cross_crop_confusion_rate": 0.0,
+      "abstention_rate": 0.0,
+      "deployment_status": "DEPLOYED",
+      "confusion_matrix": [
+        [
+          2,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "labels": [
+        "Apple Scab",
+        "Apple with Black Rot",
+        "Cedar Apple Rust",
+        "Healthy Apple"
+      ]
+    },
+    "Potato_leaf": {
+      "crop": "Potato",
+      "plant_part": "leaf",
+      "samples": 3,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "cross_crop_confusion_rate": 0.0,
+      "abstention_rate": 0.0,
+      "deployment_status": "DEPLOYED",
+      "confusion_matrix": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "labels": [
+        "Healthy Potato Plant",
+        "Potato with Early Blight",
+        "Potato with Late Blight"
+      ]
+    },
+    "whole_plant_view": {
+      "plant_part": "whole_plant",
+      "samples": 1,
+      "abstention_rate": 1.0,
+      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
+      "safe_refusal_compliant": true
+    },
+    "canopy_view": {
+      "plant_part": "canopy",
+      "samples": 1,
+      "abstention_rate": 1.0,
+      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
+      "safe_refusal_compliant": true
+    },
+    "non_foliar_parts": {
+      "plant_part": "stem",
+      "samples": 4,
+      "abstention_rate": 1.0,
+      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
+      "safe_refusal_compliant": true
+    },
+    "non_plant_ood": {
+      "samples": 3,
+      "rejection_rate": 1.0,
+      "deployment_status": "DEPLOYED_OOD_GATE",
+      "compliant": true
+    }
+  },
+  "summary": {
+    "overall_foliar_f1": 1.0,
+    "cross_crop_confusion_rate": 0.0,
+    "unsupported_viewpoint_abstention_rate": 1.0,
+    "ood_rejection_rate": 1.0,
+    "validation_passed": true
+  }
+}

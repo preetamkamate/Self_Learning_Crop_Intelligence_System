@@ -93,11 +93,12 @@ class AdvisorySynthesisService:
             "3. HONESTY & REFUSAL GATING:\n"
             "   - If Vision Status is 'OUT_OF_DISTRIBUTION' (non-plant image detected), do NOT guess a crop disease. Politely inform the farmer that no plant or crop canopy was recognized (DINOv2 similarity failed), and advise uploading an actual plant photo.\n"
             "   - If Vision Status is 'INSUFFICIENT_IMAGE_QUALITY' (blurry/out-of-focus image), advise farmer to hold steady and retake a sharp photo in daylight.\n"
+            "   - If Vision Status is 'UNSUPPORTED_CROP_PART', state clearly: 'Valid plant image detected. Disease diagnosis is not available yet for this crop/plant part.' Do NOT guess a disease, do NOT list unrelated candidate diseases from other crops, and do NOT prescribe chemical sprays. Provide only neutral photo-capture guidance asking for a close-up photo of an affected leaf.\n"
             "   - If Vision Status is 'INSUFFICIENT_EVIDENCE' (e.g. non-leaf part or unconfirmed symptoms), do NOT force a chemical prescription. Explain that visual cues are insufficient and recommend physical inspection (such as stem cross-section or root wash).\n"
-            "   - If Vision Status is 'PROBABLE_DIAGNOSIS_NEEDS_CONFIRMATION' (valid crop with localized or quadrant variation), return 'Possible diagnosis—needs confirmation', list top 3 candidate diagnoses with probabilities, requested next photo or field information, caution 'Do not spray chemical fungicides or insecticides blindly until symptoms are physically verified', and provide safe organic/cultural first-aid.\n"
+            "   - If Vision Status is 'PROBABLE_DIAGNOSIS_NEEDS_CONFIRMATION' (valid crop with localized or quadrant variation), return 'Possible diagnosis—needs confirmation', list top 3 candidate diagnoses of that identified crop only with probabilities, requested next photo or field information, caution 'Do not spray chemical fungicides or insecticides blindly until symptoms are physically verified', and provide safe organic/cultural first-aid.\n"
             "   - If Vision Status is 'UNCERTAIN' (conflicting symptoms across plant quadrants), clearly state the uncertainty, and advise taking a closer, well-lit photo rather than spraying blind chemicals.\n"
             "   - For nutrient deficiencies, clearly state that visual screening is a hypothesis, not a confirmed diagnosis, and advise soil NPK/pH and leaf tissue testing.\n"
-            "4. TREATMENT SPECIFICITY & AUTHORITATIVE SOURCE CITATION: For confirmed or probable diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives. Always display the authoritative primary source with title, organization, direct HTTPS link, access date, and supported recommendation. Never fabricate chemical doses.\n"
+            "4. TREATMENT SPECIFICITY & AUTHORITATIVE SOURCE CITATION: For confirmed or probable diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives. Always display the authoritative primary source with title, organization, direct HTTPS link, access date, and supported recommendation. Never fabricate chemical doses. If diagnosis is unavailable, show no disease-management link.\n"
             "5. DUAL BILINGUAL OUTPUT FORMAT:\n"
             "   You must provide your response in EXACTLY two sections separated by markers:\n"
             "   ---ENGLISH---\n"
@@ -500,6 +501,32 @@ class AdvisorySynthesisService:
                     f"- **ಸ್ಥಿತಿ**: ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಫೋಟೋ ಮಸುಕಾಗಿದೆ. ಎಲೆಯ ಸೂಕ್ಷ್ಮ ರೋಗಲಕ್ಷಣಗಳು ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ.\n"
                     f"- **ಸೂಚನೆ**: ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ.\n\n"
                     f"👉 **ಮುಂದಿನ ಕ್ರಮ**:\n{next_kn}"
+                )
+                return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
+
+            # 2B. Unsupported Crop or Plant Part Route (Untrained Viewpoint)
+            if status == "unsupported_crop_part":
+                crop = vision.get("crop_species", "Unknown Crop")
+                part = vision.get("plant_part", "plant part")
+                part_display = part.replace("_", " ").title()
+                next_en = vision.get("requested_next_action_en", "Please capture a clear, well-lit close-up photograph of an affected leaf.")
+                next_kn = vision.get("requested_next_action_kn", "ದಯವಿಟ್ಟು ರೋಗಬಾಧಿತ ಎಲೆಯ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆದು ಕಳುಹಿಸಿ.")
+
+                en = (
+                    f"### 🌿 Plant Part & Diagnostic Coverage Notice\n\n"
+                    f"**Valid plant image detected. Disease diagnosis is not available yet for this crop/plant part.**\n\n"
+                    f"- **Identified Crop**: {crop}\n"
+                    f"- **Plant Part / Viewpoint**: {part_display}\n"
+                    f"- **Diagnostic Coverage**: Automatic disease models are not yet deployed for this viewpoint. Generic guesses and chemical sprays are strictly withheld to protect your crop.\n\n"
+                    f"👉 **Photo-Capture Guidance**:\n{next_en}"
+                )
+                kn = (
+                    f"### 🌿 ಸಸ್ಯದ ಭಾಗ ಮತ್ತು ರೋಗನಿರ್ಣಯ ವ್ಯಾಪ್ತಿಯ ಮಾಹಿತಿ\n\n"
+                    f"**ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ. ಈ ಬೆಳೆ ಅಥವಾ ಸಸ್ಯದ ಭಾಗಕ್ಕೆ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\n"
+                    f"- **ಗುರುತಿಸಿದ ಬೆಳೆ**: {crop}\n"
+                    f"- **ಸಸ್ಯದ ಭಾಗ**: {part_display}\n"
+                    f"- **ಮಾಹಿತಿ**: ಈ ಕೋನದಿಂದ ರೋಗನಿರ್ಣಯಕ್ಕೆ ತರಬೇತಿ ನೀಡಲಾದ ಮಾದರಿ ಸದ್ಯಕ್ಕೆ ಲಭ್ಯವಿಲ್ಲ. ತಪ್ಪು ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಡೆಯಲು ಯಾವುದೇ ರೋಗವನ್ನು ಊಹಿಸಲಾಗಿಲ್ಲ.\n\n"
+                    f"👉 **ಫೋಟೋ ತೆಗೆಯುವ ಮಾರ್ಗದರ್ಶನ**:\n{next_kn}"
                 )
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
