@@ -27,8 +27,10 @@ import config
 from src.rag.authoritative_sources import get_authoritative_source_citation
 from src.vision.hierarchical_classifier import (
     HierarchicalVisionPipeline,
+    build_top_candidates,
     compute_shannon_entropy,
     measure_image_sharpness,
+    normalize_candidate,
 )
 from src.vision.model import get_vision_models
 from src.vision.nutrient import (

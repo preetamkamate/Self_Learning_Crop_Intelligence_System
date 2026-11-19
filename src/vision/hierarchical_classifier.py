@@ -10,6 +10,7 @@ Stage 4: Gated Pathology Diagnosis (Strictly constrained to confirmed crop subsp
 import io
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -82,6 +83,145 @@ def compute_shannon_entropy(probabilities: np.ndarray, eps: float = 1e-12) -> fl
     clipped = np.clip(probabilities, eps, 1.0)
     entropy = -np.sum(clipped * np.log(clipped))
     return float(entropy)
+
+
+def _is_debug_mode(explicit_debug: Optional[bool] = None) -> bool:
+    """Determine whether debug/development mode is active."""
+    if explicit_debug is not None:
+        return explicit_debug
+    env_debug = os.getenv("DEBUG", "").lower() in ["1", "true", "yes", "dev", "development"]
+    env_app_env = os.getenv("APP_ENV", "").lower() in ["dev", "development", "local"]
+    log_debug = logging.getLogger().isEnabledFor(logging.DEBUG)
+    return env_debug or env_app_env or log_debug
+
+
+def normalize_candidate(
+    candidate: Any,
+    debug_mode: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """
+    Standardize a candidate prediction dictionary into:
+        {"class": "label name", "prob": 0.0}
+    along with 'label', 'probability', and 'confidence_percent' aliases for backwards compatibility.
+    
+    Handles malformed inputs (None, missing fields, strings, invalid numbers, out-of-range floats)
+    gracefully without crashing. Logs malformed candidates only in debug/development mode.
+    """
+    is_debug = _is_debug_mode(debug_mode)
+    malformed_reason = None
+    label = None
+    prob = None
+
+    if candidate is None:
+        malformed_reason = "Candidate item is None"
+        label = "Unknown candidate"
+        prob = 0.0
+    elif isinstance(candidate, (tuple, list)):
+        label = str(candidate[0]) if len(candidate) > 0 and candidate[0] is not None else "Unknown candidate"
+        raw_prob = candidate[1] if len(candidate) > 1 else None
+        if raw_prob is not None:
+            if isinstance(raw_prob, str):
+                malformed_reason = f"String probability in pair: {raw_prob!r}"
+            try:
+                val = float(raw_prob)
+                if 0.0 <= val <= 1.0:
+                    prob = val
+                else:
+                    malformed_reason = f"Probability out-of-range ({val})"
+                    prob = 0.0
+            except (TypeError, ValueError):
+                malformed_reason = f"Non-numeric probability: {raw_prob!r}"
+                prob = 0.0
+        else:
+            malformed_reason = "Missing probability in pair"
+            prob = 0.0
+    elif isinstance(candidate, dict):
+        label = (
+            candidate.get("class")
+            or candidate.get("label")
+            or candidate.get("condition")
+            or "Unknown candidate"
+        )
+        raw_prob = candidate.get("prob")
+        if raw_prob is None and "prob" not in candidate:
+            if candidate.get("probability") is not None:
+                raw_prob = candidate.get("probability")
+            elif "confidence_percent" in candidate:
+                raw_conf = candidate.get("confidence_percent")
+                try:
+                    raw_prob = float(raw_conf) / 100.0
+                except (TypeError, ValueError):
+                    raw_prob = None
+
+        if raw_prob is None:
+            malformed_reason = "Missing or null 'prob' field"
+            prob = 0.0
+        else:
+            if isinstance(raw_prob, str):
+                malformed_reason = f"String probability value: {raw_prob!r}"
+            try:
+                val = float(raw_prob)
+                if 0.0 <= val <= 1.0:
+                    prob = val
+                else:
+                    malformed_reason = f"Probability out-of-range ({val})"
+                    prob = 0.0
+            except (TypeError, ValueError):
+                malformed_reason = f"Non-numeric probability: {raw_prob!r}"
+                prob = 0.0
+    else:
+        malformed_reason = f"Invalid candidate object type: {type(candidate).__name__}"
+        label = str(candidate)
+        prob = 0.0
+
+    if malformed_reason and is_debug:
+        logging.debug("Malformed candidate normalized: %s | Candidate: %r", malformed_reason, candidate)
+
+    prob_float = round(float(prob if prob is not None else 0.0), 4)
+    return {
+        "class": str(label),
+        "prob": prob_float,
+        "label": str(label),
+        "probability": prob_float,
+        "confidence_percent": round(prob_float * 100, 2),
+    }
+
+
+def build_top_candidates(
+    candidates: Any,
+    top_k: Optional[int] = 3,
+    debug_mode: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Standardize a collection of candidate predictions to ensure every candidate
+    consistently returns:
+        {"class": "label name", "prob": 0.0}
+    along with 'label' and 'probability' aliases for backwards compatibility.
+    Does not crash when a candidate is malformed (None, missing prob, string, out of range).
+    Logs malformed candidates only in development/debug mode.
+    """
+    is_debug = _is_debug_mode(debug_mode)
+    if candidates is None:
+        if is_debug:
+            logging.debug("build_top_candidates received None candidates input")
+        return []
+
+    if isinstance(candidates, dict):
+        return [normalize_candidate(candidates, debug_mode=debug_mode)]
+
+    if not isinstance(candidates, (list, tuple)):
+        if is_debug:
+            logging.debug("build_top_candidates received non-iterable input: %r", type(candidates))
+        return [normalize_candidate(candidates, debug_mode=debug_mode)]
+
+    results: List[Dict[str, Any]] = []
+    for cand in candidates:
+        norm = normalize_candidate(cand, debug_mode=debug_mode)
+        results.append(norm)
+        if top_k is not None and len(results) >= top_k:
+            break
+
+    return results
 
 
 class HierarchicalVisionPipeline:
@@ -668,17 +808,20 @@ class HierarchicalVisionPipeline:
             top1_class_idx = indices[top1_sub_idx]
             top1_label = self.id2label[str(top1_class_idx) if str(top1_class_idx) in self.id2label else top1_class_idx]
 
-            crop_top_predictions: List[Dict[str, Any]] = []
+            raw_top_predictions: List[Dict[str, Any]] = []
             for i in range(min(top_k, len(sorted_crop_order))):
                 s_idx = int(sorted_crop_order[i])
                 c_idx = indices[s_idx]
                 lbl = self.id2label[str(c_idx) if str(c_idx) in self.id2label else c_idx]
                 c_prob = float(norm_crop_probs[s_idx])
-                crop_top_predictions.append({
+                raw_top_predictions.append({
+                    "class": lbl,
+                    "prob": round(c_prob, 4),
                     "label": lbl,
                     "probability": round(c_prob, 4),
                     "confidence_percent": round(c_prob * 100, 2),
                 })
+            crop_top_predictions = build_top_candidates(raw_top_predictions, top_k=top_k)
 
             parsed = parse_legacy_label(top1_label)
             is_healthy = parsed["is_healthy"]
@@ -718,16 +861,19 @@ class HierarchicalVisionPipeline:
             top1_prob = float(norm_crop_probs[top1_sub_idx])
             top1_label = valid_classes[top1_sub_idx]
 
-            crop_top_predictions = []
+            raw_top_predictions = []
             for i in range(min(top_k, len(sorted_crop_order))):
                 s_idx = int(sorted_crop_order[i])
                 lbl = valid_classes[s_idx]
                 c_prob = float(norm_crop_probs[s_idx])
-                crop_top_predictions.append({
+                raw_top_predictions.append({
+                    "class": lbl,
+                    "prob": round(c_prob, 4),
                     "label": lbl,
                     "probability": round(c_prob, 4),
                     "confidence_percent": round(c_prob * 100, 2),
                 })
+            crop_top_predictions = build_top_candidates(raw_top_predictions, top_k=top_k)
 
             is_healthy = "healthy" in top1_label.lower()
             affected_reg_desc = f"Observed on {crop_species} {plant_part.value.replace('_', ' ')}"

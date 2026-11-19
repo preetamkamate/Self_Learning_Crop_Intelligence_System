@@ -458,7 +458,20 @@ for idx, msg in enumerate(st.session_state.messages):
                                 if top3:
                                     st.markdown("**Top-3 Probabilities:**")
                                     for t in top3:
-                                        st.caption(f"  - `{t.get('class')}`: **{t.get('prob')*100:.2f}%**")
+                                        if not isinstance(t, dict):
+                                            continue
+                                        label = t.get("class") or t.get("label") or "Unknown candidate"
+                                        raw_prob = t.get("prob") if t.get("prob") is not None else t.get("probability")
+
+                                        try:
+                                            prob = float(raw_prob)
+                                        except (TypeError, ValueError):
+                                            prob = None
+
+                                        if prob is not None and 0.0 <= prob <= 1.0:
+                                            st.caption(f"- `{label}`: **{prob * 100:.2f}%**")
+                                        else:
+                                            st.caption(f"- `{label}`: confidence unavailable")
 
                                 q_preds = dbg.get("quadrant_predictions", [])
                                 if q_preds:
