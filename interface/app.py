@@ -228,8 +228,8 @@ with st.sidebar:
     st.subheader("⚙️ Vision & OOD Tuning")
     ood_threshold_val = st.slider(
         "DINOv2 Plant OOD Threshold:",
-        min_value=0.10,
-        max_value=0.85,
+        min_value=0.05,
+        max_value=0.50,
         value=float(config.DINOV2_PLANT_OOD_THRESHOLD),
         step=0.01,
         help="Cosine similarity below this threshold flags non-plant/unrelated objects. Configurable via DINOV2_PLANT_OOD_THRESHOLD env var.",

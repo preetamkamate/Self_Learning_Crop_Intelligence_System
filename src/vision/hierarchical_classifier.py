@@ -238,8 +238,27 @@ class HierarchicalVisionPipeline:
             out = self.dinov2_wrapper.model(**inputs)
             target_emb = F.normalize(out.last_hidden_state[:, 0, :], dim=-1)
 
+        # 1. Blank / solid uniform screen rejection (std < 3.0)
+        arr = np.array(img, dtype=np.float32)
+        if arr.std() < 3.0:
+            return (not is_blurry), False, blur_metric, 0.0, target_emb
+
+        # 2. Pure high-frequency random noise / static rejection
+        gray = arr.mean(axis=-1)
+        diff_h = float(np.abs(gray[:, 1:] - gray[:, :-1]).mean())
+        diff_v = float(np.abs(gray[1:, :] - gray[:-1, :]).mean())
+        if diff_h > 35.0 and diff_v > 35.0:
+            return (not is_blurry), False, blur_metric, 0.05, target_emb
+
         sims = F.cosine_similarity(target_emb, self.ref_embeddings)
         dinov2_sim = float(sims.max().item())
+
+        # 3. Geometric pattern / checkerboard rejection
+        if blur_metric > 18000.0 and diff_h < 25.0:
+            foliar_sim = float(F.cosine_similarity(target_emb, self.ref_embeddings[:20]).max().item())
+            if foliar_sim < 0.10:
+                return (not is_blurry), False, blur_metric, foliar_sim, target_emb
+
         is_plant = dinov2_sim >= dinov2_threshold
 
         return (not is_blurry), is_plant, blur_metric, dinov2_sim, target_emb

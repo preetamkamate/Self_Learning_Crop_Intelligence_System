@@ -38,8 +38,8 @@ else:
 # Vision Model Configuration
 # Whole-Plant DINOv2 Backbone + Fine-Tuned Plant Pathology Classifier
 DINOV2_MODEL_ID = os.getenv("DINOV2_MODEL_ID", "facebook/dinov2-small")
-# Configurable DINOv2 agricultural similarity gate (default: 0.50; non-plants <= 0.47, plant parts >= 0.84)
-DINOV2_PLANT_OOD_THRESHOLD = float(os.getenv("DINOV2_PLANT_OOD_THRESHOLD", "0.50"))
+# Configurable DINOv2 agricultural similarity gate (default: 0.16; non-plants <= 0.155, field plant photos >= 0.17)
+DINOV2_PLANT_OOD_THRESHOLD = float(os.getenv("DINOV2_PLANT_OOD_THRESHOLD", "0.16"))
 VISION_MODEL_ID = os.getenv("VISION_MODEL_ID", "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification")
 # Calibrated Shannon Predictive Entropy thresholds (C=38 classes; max theoretical ln(38) = 3.6375)
 # Raw threshold 2.20 corresponds to normalized entropy H_norm <= 0.605
