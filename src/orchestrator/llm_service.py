@@ -92,8 +92,10 @@ class AdvisorySynthesisService:
             "2. CONCISE & SCANNABLE: Keep each language advisory between 120 and 180 words. Use clean Markdown with short, easily readable bullet points (e.g., Diagnosis, Key Symptoms, Immediate Action/Dosage, Cultural Management).\n"
             "3. HONESTY & REFUSAL GATING:\n"
             "   - If Vision Status is 'OUT_OF_DISTRIBUTION' (non-plant image detected), do NOT guess a crop disease. Politely inform the farmer that no plant or crop canopy was recognized (DINOv2 similarity failed), and advise uploading an actual plant photo.\n"
+            "   - If Vision Status is 'INSUFFICIENT_EVIDENCE' (e.g. non-leaf part or unconfirmed symptoms), do NOT force a chemical prescription. Explain that visual cues are insufficient and recommend physical inspection (such as stem cross-section or root wash).\n"
             "   - If Vision Status is 'UNCERTAIN' (high entropy / conflicting symptoms across plant quadrants), clearly state the uncertainty, explain what symptoms conflict, and advise taking a closer, well-lit photo of the leaf or stem rather than spraying blind chemicals.\n"
-            "4. TREATMENT SPECIFICITY: For confirmed diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives (e.g. Neem Oil 10,000 ppm @ 3 ml/L or Pseudomonas fluorescens @ 5 g/L) and cultural practices.\n"
+            "   - For nutrient deficiencies, clearly state that visual screening is a hypothesis, not a confirmed diagnosis, and advise soil NPK/pH and leaf tissue testing.\n"
+            "4. TREATMENT SPECIFICITY & SOURCE EVIDENCE: For confirmed diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives (e.g. Neem Oil 10,000 ppm @ 3 ml/L or Pseudomonas fluorescens @ 5 g/L). Always cite the primary ICAR/IIHR/SAU source. Never fabricate chemical doses.\n"
             "5. DUAL BILINGUAL OUTPUT FORMAT:\n"
             "   You must provide your response in EXACTLY two sections separated by markers:\n"
             "   ---ENGLISH---\n"
@@ -142,14 +144,18 @@ class AdvisorySynthesisService:
             v_reg = vision.get("affected_regions", "Whole Canopy")
             v_healthy = vision.get("is_healthy", False)
             v_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
+            v_part = vision.get("plant_part", "leaf")
+            v_source_cite = vision.get("source_evidence", "ICAR Guidelines")
             vision_block = (
                 f"- Status: {v_status.upper()}\n"
+                f"- Plant Part / Viewpoint: {v_part.upper()}\n"
                 f"- Top Condition: {v_label} (Kannada: {v_label_kn})\n"
                 f"- Confidence: {v_conf:.1f}%\n"
                 f"- Shannon Entropy H(p): {v_entropy:.3f} (Threshold: >1.80 is uncertain)\n"
                 f"- DINOv2 Plant Match: {v_dino:.3f} (Threshold: <{v_thresh:.2f} is Non-Plant OOD)\n"
                 f"- Affected Plant Regions: {v_reg}\n"
-                f"- Healthy Crop Flag: {v_healthy}"
+                f"- Healthy Crop Flag: {v_healthy}\n"
+                f"- Sourced Authority: {v_source_cite}"
             )
         else:
             vision_block = "None (Vision module did not run in this turn)."
@@ -428,6 +434,31 @@ class AdvisorySynthesisService:
                 )
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
+            # Insufficient Evidence Gate (e.g. non-leaf part with low confidence)
+            if status == "insufficient_evidence":
+                plant_part = vision.get("plant_part", "plant part")
+                en = (
+                    f"⚠️ **Insufficient Visual Evidence ({plant_part.title()})**\n\n"
+                    f"- **Plant Context**: The DINOv2 backbone confirmed a genuine plant ({plant_part}), but visual symptoms are ambiguous.\n"
+                    f"- **Safety Gate**: Automatic disease prescription was withheld to prevent unjustified chemical application.\n"
+                    f"- **Recommended Diagnostic Checks**:\n"
+                    f"  1. For stem/trunk: Check for sap oozing, bark fissures, or internal vascular discoloration (vascular browning).\n"
+                    f"  2. For roots: Wash roots gently to inspect for root-knot nematode galls or waterlogged rotting.\n"
+                    f"  3. For foliage: Capture a well-illuminated close-up photo of the transition margin between healthy and affected tissue.\n\n"
+                    f"📚 **Source Evidence**: {vision.get('source_evidence', 'ICAR Integrated Pest & Disease Diagnostic Protocol.')}"
+                )
+                kn = (
+                    f"⚠️ **ಅಸ್ಪಷ್ಟ ದೃಶ್ಯ ಸಾಕ್ಷ್ಯ ({plant_part})**\n\n"
+                    f"- **ಸಸ್ಯದ ಭಾಗ**: ಈ ಚಿತ್ರದಲ್ಲಿ ಸಸ್ಯದ {plant_part} ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ರೋಗಲಕ್ಷಣಗಳು ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ.\n"
+                    f"- **ಸುರಕ್ಷತಾ ಕ್ರಮ**: ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ.\n"
+                    f"- **ಪರಿಶೀಲಿಸಬೇಕಾದ ಅಂಶಗಳು**:\n"
+                    f"  1. ಕಾಂಡ/ತೊಗಟೆ: ಕಪ್ಪು ದ್ರವ ಸೋರುತ್ತಿದೆಯೇ ಅಥವಾ ಬಿರುಕು ಬಿಟ್ಟಿದೆಯೇ ಗಮನಿಸಿ.\n"
+                    f"  2. ಬೇರುಗಳು: ಬೇರುಗಳಲ್ಲಿ ಗಂಟುಗಳು (Nematodes) ಅಥವಾ ಕೊಳೆತ ಲಕ್ಷಣಗಳನ್ನು ಪರೀಕ್ಷಿಸಿ.\n"
+                    f"  3. ಎಲೆಗಳು: ರೋಗಪೀಡಿತ ಮತ್ತು ಹಸಿರು ಎಲೆಯ ಅಂಚಿನ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆಯಿರಿ.\n\n"
+                    f"📚 **ಮೂಲ ಪ್ರಾಧಿಕಾರ**: {vision.get('source_evidence', 'ICAR ಕೃಷಿ ರೋಗನಿರ್ಣಯ ಮಾರ್ಗಸೂಚಿ.')}"
+                )
+                return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
+
             # Uncertain / Conflicted Multi-Quadrant Pattern
             if status == "uncertain":
                 entropy = vision.get("entropy", 0.0)
@@ -483,7 +514,8 @@ class AdvisorySynthesisService:
                     f"- **Organic / Bio-control**: {treatments['organic_en']}\n"
                     f"- **Chemical Treatment**: {treatments['chemical_en']}\n"
                     f"- **Cultural Action**: {treatments['cultural_en']}\n\n"
-                    f"*Follow 7-day pre-harvest interval (PHI) for chemical sprays.*"
+                    f"*Follow 7-day pre-harvest interval (PHI) for chemical sprays.*\n\n"
+                    f"📚 **Source Evidence**: {vision.get('source_evidence', 'ICAR-IIHR Agricultural Package of Practices.')}"
                 )
                 kn = (
                     f"### 🔬 ರೋಗ ಪತ್ತೆ: **{top1_kn}** (ಖಚಿತತೆ: {conf:.1f}%)\n\n"
@@ -493,8 +525,29 @@ class AdvisorySynthesisService:
                     f"- **ಜೈವಿಕ / ಸಾವಯವ ನಿಯಂತ್ರಣ**: {treatments['organic_kn']}\n"
                     f"- **ರಾಸಾಯನಿಕ ಸಿಂಪಡಣೆ**: {treatments['chemical_kn']}\n"
                     f"- **ಮುನ್ನೆಚ್ಚರಿಕೆ**: {treatments['cultural_kn']}\n\n"
-                    f"*ಔಷಧಿ ಸಿಂಪಡಿಸುವಾಗ ಮುಖಗವಸು ಧರಿಸಿ ಮತ್ತು ಕಾಯುವ ಅವಧಿಯನ್ನು ಪಾಲಿಸಿ.*"
+                    f"*ಔಷಧಿ ಸಿಂಪಡಿಸುವಾಗ ಮುಖಗವಸು ಧರಿಸಿ ಮತ್ತು ಕಾಯುವ ಅವಧಿಯನ್ನು ಪಾಲಿಸಿ.*\n\n"
+                    f"📚 **ಮೂಲ ಪ್ರಾಧಿಕಾರ**: {vision.get('source_evidence', 'ICAR-IIHR ಕೃಷಿ ಮಾರ್ಗಸೂಚಿಗಳು.')}"
                 )
+
+            # Append Nutrient Screening Hypothesis if applicable
+            nut_screen = vision.get("nutrient_screening")
+            if nut_screen and not is_healthy:
+                cands = nut_screen.get("candidate_deficiencies", [])
+                if cands:
+                    top_nut = cands[0]
+                    en += (
+                        f"\n\n---\n"
+                        f"🌱 **Nutrient Screening Hypothesis**: Foliar symptoms also resemble **{top_nut['name']}**.\n"
+                        f"- *Mobility*: {top_nut['mobility'].capitalize()} (primarily manifests on {top_nut['affected_tissue'].replace('_', ' ')}).\n"
+                        f"- *University Guideline*: {top_nut['sau_guideline']}\n"
+                        f"> ⚠️ *Visual screening hypothesis only. Confirm via Soil Health Card before purchasing high-dose fertilizer.*"
+                    )
+                    kn += (
+                        f"\n\n---\n"
+                        f"🌱 **ಪೋಷಕಾಂಶ ಕೊರತೆ ಪರಿಶೀಲನಾ ಊಹೆ**: ಈ ಲಕ್ಷಣಗಳು **{top_nut['name_kannada']}** ಕೊರತೆಯನ್ನು ಸಹ ಹೋಲುತ್ತವೆ.\n"
+                        f"- *ವಿಶ್ವವಿದ್ಯಾಲಯ ಶಿಫಾರಸು*: {top_nut['sau_guideline_kn']}\n"
+                        f"> ⚠️ *ಇದು ದೃಶ್ಯ ತಪಾಸಣೆ ಮಾತ್ರ. ರಾಸಾಯನಿಕ ಗೊಬ್ಬರ ಬಳಸುವ ಮುನ್ನ ಮಣ್ಣು ಪರೀಕ್ಷೆ ನಡೆಸಿ.*"
+                    )
 
             # Append spray weather advisory if weather was also requested with image
             if weather:

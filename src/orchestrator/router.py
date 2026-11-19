@@ -171,7 +171,15 @@ class AutonomousRouter:
             logging.info("AutonomousRouter: Running Whole-Plant Vision (New Image Uploaded)...")
             modules_run.append("Whole-Plant Vision (DINOv2 + Multi-Scale Pathology)")
             dinov2_thresh = kwargs.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
-            vision_result = self.vision_predictor.predict(image_input, dinov2_threshold=dinov2_thresh)
+            vision_result = self.vision_predictor.predict(
+                image_input,
+                user_crop_hint=kwargs.get("crop_hint", getattr(state.profile, "active_crop", None)),
+                user_part_hint=kwargs.get("part_hint", None),
+                soil_ph=getattr(state.profile, "soil_ph", None),
+                growth_stage=kwargs.get("growth_stage", None),
+                symptom_duration=kwargs.get("symptom_duration", None),
+                dinov2_threshold=dinov2_thresh,
+            )
             state.set_vision_result(vision_result, image_hash=image_hash)
             primary_intent = "disease_diagnosis"
         elif wants_weather:

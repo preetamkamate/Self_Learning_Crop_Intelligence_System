@@ -1,0 +1,250 @@
+# Dataset Registry for Self-Learning Crop Intelligence System
+# All datasets listed here are vetted for research/academic legality, open licenses, and multi-part plant coverage.
+# Downloads are only executed via download_datasets.py upon explicit user request.
+# No datasets are automatically downloaded at application startup.
+
+datasets:
+  - id: "plantdoc"
+    name: "PlantDoc: A Dataset for Visual Plant Disease Detection in Natural Field Conditions"
+    official_page: "https://github.com/pratikkayal/PlantDoc-Dataset"
+    download_url: "https://github.com/pratikkayal/PlantDoc-Dataset/archive/refs/heads/master.zip"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Singh, A. et al. (2020). PlantDoc: A Dataset for Visual Plant Disease Detection in Natural Field Conditions. In Proceedings of the 7th ACM IKDD CoDS and 25th COMAD (CoDS-COMAD 2020), pp. 249-253. DOI: 10.1145/3371158.3371196"
+    crops:
+      - "Apple"
+      - "Bell Pepper"
+      - "Blueberry"
+      - "Cherry"
+      - "Corn (Maize)"
+      - "Grape"
+      - "Peach"
+      - "Potato"
+      - "Raspberry"
+      - "Soybean"
+      - "Strawberry"
+      - "Tomato"
+    supported_parts:
+      - "leaf"
+      - "whole_plant"
+      - "canopy"
+      - "stem"
+      - "fruit"
+    labels_available:
+      - "disease"
+      - "healthy"
+    size_mb: 1100
+    expected_images: 2569
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/plantdoc"
+    known_limitations: "Natural field images with complex background clutter; varying illumination and multi-leaf overlaps require robust object detection/tiling."
+
+  - id: "mendeley_maize_nutrient"
+    name: "Maize Nutrient Deficiency Image Dataset (N, P, K, Mg)"
+    official_page: "https://data.mendeley.com/datasets/34gb2gr7p2/1"
+    download_url: "https://prod-drc-mendeley-cdn.s3.amazonaws.com/34gb2gr7p2/1"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Bandi, V. et al. (2021). Maize Leaf Nutrient Deficiency Dataset. Mendeley Data, V1, DOI: 10.17632/34gb2gr7p2.1"
+    crops:
+      - "Corn (Maize)"
+    supported_parts:
+      - "leaf"
+      - "whole_plant"
+      - "canopy"
+    labels_available:
+      - "nutrient_deficiency"
+      - "healthy"
+    size_mb: 850
+    expected_images: 2000
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/mendeley_maize_nutrient"
+    known_limitations: "Visual symptoms of N/P/K/Mg deficiencies on maize can mimic drought or cold stress under field conditions."
+
+  - id: "coleaf_coffee_nutrient"
+    name: "CoLeaf: Nutritional Deficiency Image Dataset of Coffee Leaves"
+    official_page: "https://data.mendeley.com/datasets/brfgw46wzb/1"
+    download_url: "https://prod-drc-mendeley-cdn.s3.amazonaws.com/brfgw46wzb/1"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Tassis, J. et al. (2021). CoLeaf: Nutritional Deficiency Image Dataset of Coffee Leaves. Mendeley Data, V1, DOI: 10.17632/brfgw46wzb.1"
+    crops:
+      - "Coffee"
+    supported_parts:
+      - "leaf"
+      - "stem"
+    labels_available:
+      - "nutrient_deficiency"
+      - "healthy"
+    size_mb: 1400
+    expected_images: 4400
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/coleaf_coffee_nutrient"
+    known_limitations: "Leaf close-ups with nutritional stresses (B, Ca, Fe, K, Mg, Mn, N, P); soil pH interactions must be verified via chemical soil testing."
+
+  - id: "mendeley_citrus_multipart"
+    name: "Citrus Diseases and Pests Multi-Part Image Dataset (Leaf, Fruit, Stem)"
+    official_page: "https://data.mendeley.com/datasets/b87k4m6y2c/1"
+    download_url: "https://prod-drc-mendeley-cdn.s3.amazonaws.com/b87k4m6y2c/1"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Sharif, M. et al. (2020). Citrus Disease Image Dataset. Mendeley Data, V1, DOI: 10.17632/b87k4m6y2c.1"
+    crops:
+      - "Citrus (Orange, Lemon, Lime)"
+    supported_parts:
+      - "leaf"
+      - "fruit"
+      - "stem"
+    labels_available:
+      - "disease"
+      - "healthy"
+    size_mb: 420
+    expected_images: 1200
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/mendeley_citrus_multipart"
+    known_limitations: "Images feature Citrus Canker, Citrus Greening (HLB), Black Spot, and Anthracnose on fruit peel and twigs."
+
+  - id: "zenodo_bark_kr"
+    name: "BARK-KR: Tree Trunk and Bark Texture Dataset"
+    official_page: "https://zenodo.org/records/5152865"
+    download_url: "https://zenodo.org/records/5152865/files/bark_dataset.zip"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Lee, S. et al. (2021). BARK-KR: Tree Bark and Trunk Image Dataset. Zenodo, DOI: 10.5281/zenodo.5152865"
+    crops:
+      - "Tree / Plantation Crops"
+    supported_parts:
+      - "bark"
+      - "stem"
+      - "whole_plant"
+    labels_available:
+      - "healthy"
+      - "abiotic_stress"
+    size_mb: 2300
+    expected_images: 3500
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/zenodo_bark_kr"
+    known_limitations: "Focuses on tree trunk and bark anatomy. Distinguishes wood/bark texture from foliar canopies."
+
+  - id: "mendeley_coconut_multipart"
+    name: "Coconut Palm Multi-Part Health & Stem Bleeding Dataset"
+    official_page: "https://data.mendeley.com/datasets/cs2pdbrhh6/1"
+    download_url: "https://prod-drc-mendeley-cdn.s3.amazonaws.com/cs2pdbrhh6/1"
+    license: "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+    citation: "Fernando, P. et al. (2021). Coconut Palm Health Assessment Dataset. Mendeley Data, V1, DOI: 10.17632/cs2pdbrhh6.1"
+    crops:
+      - "Coconut"
+    supported_parts:
+      - "bark"
+      - "stem"
+      - "canopy"
+      - "whole_plant"
+    labels_available:
+      - "disease"
+      - "pest"
+      - "healthy"
+    size_mb: 650
+    expected_images: 1500
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/mendeley_coconut_multipart"
+    known_limitations: "Covers stem bleeding (Thielaviopsis paradoxa), bud rot, and crown flaccidity of plantation palms."
+
+  - id: "cropdeep_multipart"
+    name: "CropDeep: A Visual Recognition Dataset for Crop Parts & Growth Stages"
+    official_page: "https://github.com/cw-csu/CropDeep-Dataset"
+    download_url: "https://github.com/cw-csu/CropDeep-Dataset"
+    license: "Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0)"
+    citation: "Zheng, C. et al. (2019). CropDeep: A Visual Recognition Dataset for Greenhouse Crop Parts. IEEE Access, 7, pp. 64239-64245."
+    crops:
+      - "Tomato"
+      - "Bell Pepper"
+      - "Cucumber"
+    supported_parts:
+      - "fruit"
+      - "stem"
+      - "flower"
+      - "canopy"
+    labels_available:
+      - "healthy"
+      - "disease"
+      - "abiotic_stress"
+    size_mb: 1800
+    expected_images: 31147
+    requires_auth: false
+    auth_instructions: "Available via Baidu Netdisk and direct mirror on GitHub releases. Academic non-commercial use only."
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/cropdeep_multipart"
+    known_limitations: "Greenhouse lighting condition; multi-stage organ detection (fruit, blossom, vine stem)."
+
+  - id: "cassava_disease_kaggle"
+    name: "Cassava Leaf & Root Health Dataset (Makerere AI Lab)"
+    official_page: "https://www.kaggle.com/c/cassava-disease"
+    download_url: "https://www.kaggle.com/c/cassava-disease/data"
+    license: "Research Community Use / Kaggle Competition Terms"
+    citation: "Mwebaze, E. et al. (2019). iCassava 2019 Challenge & Dataset. Makerere University AI Lab."
+    crops:
+      - "Cassava"
+    supported_parts:
+      - "leaf"
+      - "canopy"
+      - "root"
+    labels_available:
+      - "disease"
+      - "healthy"
+    size_mb: 6000
+    expected_images: 21397
+    requires_auth: true
+    auth_instructions: "Requires Kaggle account login and acceptance of competition rules. Download via Kaggle CLI: 'kaggle competitions download -c cassava-disease'. Do not attempt to bypass login."
+    checksum_sha256: ""
+    status: "not_downloaded"
+    local_dir: "data/raw/datasets/cassava_disease_kaggle"
+    known_limitations: "Large field dataset (~6 GB). Requires Kaggle authentication token (~/.kaggle/kaggle.json)."
+
+  - id: "plantvillage_baseline"
+    name: "PlantVillage Foliar Pathology Dataset (Active Baseline)"
+    official_page: "https://github.com/spMohanty/PlantVillage-Dataset"
+    download_url: "https://github.com/spMohanty/PlantVillage-Dataset/archive/master.zip"
+    license: "Creative Commons Zero v1.0 Universal (CC0 1.0 Public Domain)"
+    citation: "Hughes, D. & Salathé, M. (2015). An open access repository of images on plant health to enable the development of mobile disease diagnostics. Nature Scientific Data, 3:160088."
+    crops:
+      - "Apple"
+      - "Blueberry"
+      - "Cherry"
+      - "Corn (Maize)"
+      - "Grape"
+      - "Orange"
+      - "Peach"
+      - "Bell Pepper"
+      - "Potato"
+      - "Raspberry"
+      - "Soybean"
+      - "Squash"
+      - "Strawberry"
+      - "Tomato"
+    supported_parts:
+      - "leaf"
+    labels_available:
+      - "disease"
+      - "healthy"
+    size_mb: 850
+    expected_images: 54306
+    requires_auth: false
+    auth_instructions: ""
+    checksum_sha256: ""
+    status: "ready"
+    local_dir: "models/vision"
+    known_limitations: "Laboratory leaf close-ups against solid grey/black backgrounds; limited representation of field canopies, stems, bark, and roots."

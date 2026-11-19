@@ -186,6 +186,36 @@ with st.sidebar:
     st.session_state.farmer_state.profile.soil_ph = ph_val
 
     st.markdown("---")
+    st.subheader("🌿 Crop & Plant Viewpoint Context")
+    crop_options = ["Auto-detect", "Tomato", "Potato", "Corn (Maize)", "Cotton", "Paddy (Rice)", "Chilli", "Citrus", "Coconut", "Apple", "Grape", "Other"]
+    confirmed_crop = st.selectbox(
+        "Crop / Tree Species:",
+        crop_options,
+        index=0,
+        help="Confirm crop/tree species for tailored diagnosis and ICAR package of practices.",
+    )
+    part_options = ["Auto-detect", "Leaf close-up", "Whole plant", "Canopy / Field", "Stem / Trunk / Bark", "Fruit / Pod", "Root"]
+    confirmed_part = st.selectbox(
+        "Plant Part / Viewpoint:",
+        part_options,
+        index=0,
+        help="Select the plant part shown in the photo to route to specialized multi-part diagnostic models.",
+    )
+    col_stg, col_dur = st.columns(2)
+    with col_stg:
+        confirmed_stage = st.selectbox(
+            "Growth Stage:",
+            ["Vegetative", "Seedling", "Flowering", "Fruiting/Maturity", "Perennial/Tree"],
+            index=0,
+        )
+    with col_dur:
+        confirmed_duration = st.selectbox(
+            "Symptom Duration:",
+            ["< 3 days", "3-7 days", "1-2 weeks", "> 1 month"],
+            index=1,
+        )
+
+    st.markdown("---")
     st.subheader("⚙️ Vision & OOD Tuning")
     ood_threshold_val = st.slider(
         "DINOv2 Plant OOD Threshold:",
@@ -296,6 +326,13 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"Refusal Gate Active: {vision.get('top1_label')}")
+                        elif status == "insufficient_evidence":
+                            v_part = vision.get("plant_part", "plant part")
+                            st.markdown(
+                                f'<span class="metric-badge badge-ood">⚠️ INSUFFICIENT VISUAL EVIDENCE ({v_part.upper()})</span>',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption("Valid plant detected, but symptoms are ambiguous. Do not apply chemicals without physical check.")
                         elif status == "uncertain":
                             st.markdown(
                                 f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN (H={entropy:.3f})</span>',
@@ -310,6 +347,28 @@ for idx, msg in enumerate(st.session_state.messages):
                             st.write(f"**Top Condition**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
+
+                        # Hierarchical & Source Evidence Cards
+                        hierarchical = vision.get("hierarchical_diagnosis")
+                        if hierarchical:
+                            st.markdown(
+                                f"**Hierarchy**: `{hierarchical.get('crop_species')}` ➔ `{hierarchical.get('plant_part')}` ➔ `{hierarchical.get('issue_category')}` "
+                                f"(`{hierarchical.get('evidence_level')}`)"
+                            )
+                        source_ev = vision.get("source_evidence")
+                        if source_ev:
+                            st.caption(f"📚 **Source Evidence**: {source_ev}")
+
+                        # Nutrient Screening Expander
+                        nut_screen = vision.get("nutrient_screening")
+                        if nut_screen:
+                            with st.expander("🌱 Nutrient Screening Hypothesis (Mobility & Soil pH)"):
+                                ph_info = nut_screen.get("ph_evaluation", {})
+                                st.caption(f"• **Soil pH Status**: {ph_info.get('message_en', 'Normal')}")
+                                cands = nut_screen.get("candidate_deficiencies", [])
+                                for c in cands[:2]:
+                                    st.caption(f"• **{c['name']}**: {c['visual_symptoms'][:100]}... (Mobility: {c['mobility']})")
+                                st.warning("⚠️ Visual screening hypothesis only. Confirm via certified soil and tissue tests.")
 
                         dbg = vision.get("debug_info")
                         if dbg:
@@ -504,6 +563,10 @@ if should_run_turn:
             is_new_image=is_new_image,  # CHANGED: Explicit boolean novelty flag
             image_hash=current_hash if is_new_image else None,
             dinov2_threshold=ood_threshold_val,
+            crop_hint=confirmed_crop,
+            part_hint=confirmed_part,
+            growth_stage=confirmed_stage,
+            symptom_duration=confirmed_duration,
             state=st.session_state.farmer_state,
         )
 

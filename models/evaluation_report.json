@@ -1,5 +1,5 @@
 {
-  "evaluation_timestamp": "2026-11-19 14:14:32",
+  "evaluation_timestamp": "2026-11-19 18:24:42",
   "hardware_environment": {
     "device": "mps",
     "platform": "darwin"
@@ -15,7 +15,7 @@
     "macro_f1": 0.9955,
     "cv_5fold_mean_pct": 99.59,
     "cv_5fold_std_pct": 0.27,
-    "avg_inference_latency_ms": 13.54
+    "avg_inference_latency_ms": 15.9
   },
   "computer_vision_and_ood": {
     "backbone_model": "facebook/dinov2-small",
@@ -27,7 +27,7 @@
     "mean_shannon_entropy": 0.7232,
     "ood_samples_evaluated": 6,
     "ood_rejection_rate_pct": 100.0,
-    "avg_multiscale_latency_ms": 95.73,
+    "avg_multiscale_latency_ms": 107.37,
     "sample_evaluations": [
       {
         "file": "Apple___Apple_scab.jpg",
@@ -123,10 +123,10 @@
     "index_type": "FAISS IndexFlatIP (Cosine Similarity)",
     "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
     "total_queries_evaluated": 10,
-    "hit1_accuracy_pct": 100.0,
+    "hit1_accuracy_pct": 90.0,
     "hit3_recall_pct": 100.0,
-    "mean_reciprocal_rank_mrr": 1.0,
-    "avg_retrieval_latency_ms": 68.43,
+    "mean_reciprocal_rank_mrr": 0.9333,
+    "avg_retrieval_latency_ms": 40.42,
     "query_evaluations": [
       {
         "query": "How to identify and control early blight in tomato?",
@@ -212,11 +212,11 @@
         "query": "How to control bacterial blight and black arm in cotton?",
         "topic": "Cotton Black Arm Blight",
         "expected_source": "cotton_icar_uas_guidelines.md",
-        "top1_source": "cotton_icar_uas_guidelines.md",
-        "top1_score": 0.5011,
-        "hit1": true,
+        "top1_source": "icar_cotton_pest_disease.md",
+        "top1_score": 0.6185,
+        "hit1": false,
         "hit3": true,
-        "reciprocal_rank": 1.0
+        "reciprocal_rank": 0.333
       },
       {
         "query": "Integrated management of cotton sucking pest complex whitefly and thrips",

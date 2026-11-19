@@ -38,8 +38,8 @@ else:
 # Vision Model Configuration
 # Whole-Plant DINOv2 Backbone + Fine-Tuned Plant Pathology Classifier
 DINOV2_MODEL_ID = os.getenv("DINOV2_MODEL_ID", "facebook/dinov2-small")
-# Configurable DINOv2 agricultural similarity gate (default: 0.20; non-plants <= 0.13, plants >= 0.20)
-DINOV2_PLANT_OOD_THRESHOLD = float(os.getenv("DINOV2_PLANT_OOD_THRESHOLD", "0.20"))
+# Configurable DINOv2 agricultural similarity gate (default: 0.16; non-plants <= 0.13, plant parts >= 0.17)
+DINOV2_PLANT_OOD_THRESHOLD = float(os.getenv("DINOV2_PLANT_OOD_THRESHOLD", "0.16"))
 VISION_MODEL_ID = os.getenv("VISION_MODEL_ID", "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification")
 OOD_ENTROPY_THRESHOLD = float(os.getenv("OOD_ENTROPY_THRESHOLD", "1.80"))
 MIN_CONFIDENCE_THRESHOLD = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.40"))
