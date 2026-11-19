@@ -72,15 +72,20 @@ def run_validation():
         )
 
         assert not is_ood, f"Plant image '{label}' was wrongly flagged as OOD (sim={sim})!"
-        if "whole-plant" in label.lower() or "canopy" in label.lower():
-            assert status == "unsupported_crop_part", f"Whole-plant image '{label}' status was '{status}' instead of unsupported_crop_part!"
-            assert "not available yet" in res.get("top1_label", "").lower()
-        else:
-            assert status in ["confident", "probable_diagnosis_needs_confirmation", "uncertain_disease"], f"Foliar image '{label}' status was '{status}'!"
-            assert len(res.get("predictions", [])) > 0, f"Foliar image '{label}' had empty disease predictions!"
+        assert status in ["confident", "probable_diagnosis_needs_confirmation", "uncertain_disease"], f"Plant image '{label}' status was '{status}'!"
+        assert len(res.get("predictions", [])) > 0, f"Plant image '{label}' had empty predictions!"
         plant_passed += 1
 
     print(f"Result: {plant_passed}/{len(plant_test_files)} representative plant images correctly accepted.\n")
+
+    # 1B. Unsupported Route Safe Abstention Check
+    print("--- TEST 1B: Unsupported Route Safe Abstention ---")
+    unsupported_res = predictor.predict(config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg", user_crop_hint="Cotton", user_part_hint="whole_plant")
+    assert unsupported_res["status"] == "unsupported_crop_part", f"Expected unsupported_crop_part, got {unsupported_res['status']}"
+    assert len(unsupported_res.get("predictions", [])) == 0, "Unsupported route must NOT have candidate predictions!"
+    assert unsupported_res.get("source_evidence") is None, "Unsupported route must NOT have source evidence links!"
+    assert "not yet supported" in unsupported_res.get("top1_label", "").lower()
+    print("  [ABSTAIN] Cotton Whole-Plant: Correctly abstained with 0 candidate diseases and 0 links.\n")
 
     # --------------------------------------------------------------------------
     # 2. Representative Non-Plant / OOD Images (Must BE OOD)

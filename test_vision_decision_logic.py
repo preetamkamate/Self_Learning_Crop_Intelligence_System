@@ -82,7 +82,7 @@ def test_vision_pipeline():
         else:
             print(f"  [SKIP] {d_path} not found")
 
-    # 3. Whole-Plant Field Image Test
+    # 3. Whole-Plant Supported Field Image Test
     print("\n3. Testing Whole-Plant Field Canopy Image...")
     field_path = config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg"
     if field_path.exists():
@@ -91,11 +91,20 @@ def test_vision_pipeline():
         print(f"  Status: {res_wp['status']} | Part: {res_wp['plant_part']} | Top-1: {res_wp['top1_label']} ({res_wp['top1_confidence']}%)")
         print(f"  Entropy: {res_wp['entropy']} | Normalized H: {res_wp['norm_entropy']} | Decision Rule: {dbg_wp['decision_rule']}")
         assert res_wp["is_ood"] is False, "Whole-plant image must NOT be OOD"
-        assert res_wp["status"] == "unsupported_crop_part", f"Expected unsupported_crop_part, got: {res_wp['status']}"
-        assert "not available yet" in res_wp["top1_label"].lower(), "Must state disease diagnosis is not available yet"
-        assert len(res_wp["predictions"]) == 0, "Must not hallucinate disease candidates on untrained whole-plant viewpoints"
-        assert res_wp["source_evidence"] is None, "Must not show chemical advice on untrained whole-plant viewpoints"
-        print("  Whole-plant field image safe abstention: PASSED")
+        assert res_wp["status"] in ["confident", "probable_diagnosis_needs_confirmation"]
+        assert "tomato" in res_wp["top1_label"].lower()
+        assert len(res_wp["predictions"]) > 0
+        assert res_wp["source_evidence"] is not None
+        print("  Whole-plant field image supported diagnosis: PASSED")
+
+        # Test Unsupported Route Safe Abstention
+        print("  Testing Unsupported Route Safe Abstention (Cotton Whole-Plant)...")
+        res_unsupp = predictor.predict(field_path, user_crop_hint="Cotton", user_part_hint="whole_plant")
+        assert res_unsupp["status"] == "unsupported_crop_part", f"Expected unsupported_crop_part, got: {res_unsupp['status']}"
+        assert "not yet supported" in res_unsupp["top1_label"].lower()
+        assert len(res_unsupp["predictions"]) == 0, "Must not hallucinate disease candidates on unsupported route"
+        assert res_unsupp["source_evidence"] is None, "Must not show chemical advice on unsupported route"
+        print("  Unsupported route safe abstention: PASSED")
     else:
         print("  [SKIP] sample_field_tomato_plant.jpg not found")
 

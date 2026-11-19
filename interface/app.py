@@ -194,7 +194,16 @@ with st.sidebar:
         index=0,
         help="Confirm crop/tree species for tailored diagnosis and ICAR package of practices.",
     )
-    part_options = ["Auto-detect", "Leaf close-up", "Whole plant", "Canopy / Field", "Stem / Trunk / Bark", "Fruit / Pod", "Root"]
+    part_options = [
+        "Auto-detect",
+        "Leaf",
+        "Stem / Branch",
+        "Fruit",
+        "Root / Tuber",
+        "Whole Plant",
+        "Canopy / Field",
+        "Bark / Trunk",
+    ]
     confirmed_part = st.selectbox(
         "Plant Part / Viewpoint:",
         part_options,
@@ -219,8 +228,8 @@ with st.sidebar:
     st.subheader("⚙️ Vision & OOD Tuning")
     ood_threshold_val = st.slider(
         "DINOv2 Plant OOD Threshold:",
-        min_value=0.05,
-        max_value=0.50,
+        min_value=0.10,
+        max_value=0.85,
         value=float(config.DINOV2_PLANT_OOD_THRESHOLD),
         step=0.01,
         help="Cosine similarity below this threshold flags non-plant/unrelated objects. Configurable via DINOV2_PLANT_OOD_THRESHOLD env var.",
@@ -339,12 +348,14 @@ for idx, msg in enumerate(st.session_state.messages):
                         elif status == "unsupported_crop_part":
                             crop_sp = vision.get("crop_species", "Plant")
                             p_part = vision.get("plant_part", "part").replace("_", " ").title()
+                            part_clean = vision.get("plant_part", "plant part").replace("_", " ")
                             st.markdown(
-                                f'<span class="metric-badge badge-module">🌿 VALID PLANT ({crop_sp} — {p_part})</span>',
+                                f'<span class="metric-badge badge-module">🌿 VALID PLANT ({crop_sp} — {p_part})</span>'
+                                f'<span class="metric-badge badge-ood">🛑 ROUTE UNSUPPORTED</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.info("ℹ️ **Valid plant image detected. Disease diagnosis is not available yet for this crop/plant part.**")
-                            st.caption("Training coverage for whole-plant/canopy/stem viewpoints is currently under ingestion and validation. Disease diagnosis requires a foliar close-up.")
+                            st.info(f"ℹ️ **Valid {part_clean} image detected. Diagnosis is not yet supported for this crop and image type.**")
+                            st.caption(f"**Abstention Reason**: No held-out validated pathology model is deployed for {crop_sp} ({p_part}). To prevent crop damage and off-target pesticide application, automated diagnosis is safely withheld.")
                         elif status == "insufficient_evidence":
                             v_part = vision.get("plant_part", "plant part")
                             st.markdown(
@@ -353,10 +364,14 @@ for idx, msg in enumerate(st.session_state.messages):
                             )
                             st.caption("Valid plant detected, but symptoms are ambiguous. Do not apply chemicals without physical check.")
                         elif status == "probable_diagnosis_needs_confirmation":
+                            part_raw = vision.get("plant_part", "leaf")
+                            route_model = "MobileNetV2 Foliar Backbone" if part_raw == "leaf" else f"models/vision/{part_raw}_classifier.pt"
                             st.markdown(
-                                f'<span class="metric-badge badge-module">🔬 PROBABLE DIAGNOSIS (NEEDS CONFIRMATION)</span>',
+                                f'<span class="metric-badge badge-module">🔬 PROBABLE DIAGNOSIS (NEEDS CONFIRMATION)</span>'
+                                f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
                                 unsafe_allow_html=True,
                             )
+                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{part_raw.replace('_', ' ').title()}`")
                             st.write(f"**Top Candidate**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}` (Norm: `{norm_entropy:.3f}`)")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
@@ -368,10 +383,14 @@ for idx, msg in enumerate(st.session_state.messages):
                             )
                             st.caption(f"Conflict across regions. Top1: {vision.get('top1_label')} ({vision.get('top1_confidence')}%)")
                         else:
+                            part_raw = vision.get("plant_part", "leaf")
+                            route_model = "MobileNetV2 Foliar Backbone" if part_raw == "leaf" else f"models/vision/{part_raw}_classifier.pt"
                             st.markdown(
-                                f'<span class="metric-badge badge-confident">✅ CONFIDENT (DINOv2={dino_sim:.3f} >= {dino_thresh:.2f})</span>',
+                                f'<span class="metric-badge badge-confident">✅ CONFIDENT (DINOv2={dino_sim:.3f} >= {dino_thresh:.2f})</span>'
+                                f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
                                 unsafe_allow_html=True,
                             )
+                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{part_raw.replace('_', ' ').title()}`")
                             st.write(f"**Top Condition**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
