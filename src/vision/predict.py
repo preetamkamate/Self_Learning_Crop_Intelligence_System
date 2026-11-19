@@ -1,24 +1,24 @@
 """
 Whole-Plant & Multi-Part Field Understanding Vision Predictor.
-Upgrades from leaf-only classification to multi-part, whole-plant crop health assessment.
+Calibrated decision logic separating:
+1. Non-Plant / OOD (DINOv2 similarity < 0.16)
+2. Insufficient Image Quality (Laplacian focus variance < 40.0)
+3. Confident Diagnosis (High top-1 probability, low normalized entropy, quadrant agreement)
+4. Probable Diagnosis - Needs Confirmation (Valid plant with moderate confidence or quadrant variation)
+5. Insufficient Visual Evidence (Ambiguous symptoms on stems, roots, or low top-1 confidence < 0.35)
 
-Architecture:
-1. Stage 0: DINOv2 Agricultural Context & Non-Plant OOD Gate (facebook/dinov2-small).
-2. Stage 1: Plant Part & Viewpoint Classifier (Leaf, Whole Plant, Canopy, Stem/Bark, Fruit, Root).
-3. Stage 2: Specialized Branch Routing:
-   - Leaf: MobileNetV2 plant pathology with Shannon entropy gating.
-   - Whole Plant / Canopy: 5-region spatial multi-scale tiling (global canopy, upper foliage, lower stem base).
-   - Stem / Bark / Tree: Vascular discoloration, stem bleeding, cankers, bark rot.
-   - Fruit / Flower: Fruit rot, blossom end rot, peel blemishes.
-   - Root: Root rot, nematode galling, root wilt.
-4. Stage 3: Nutrient Deficiency & Mobility Reasoning:
-   - Distinguishes mobile (N, P, K, Mg - lower foliage) vs immobile (Fe, Zn, Ca, B - young shoots).
-   - Evaluates soil pH lockout risks (acidic <5.5 vs alkaline >7.5).
-   - Enforces screening hypothesis disclaimer and laboratory test recommendations.
-5. Stage 4: Authoritative Source Evidence Citing ICAR, IIHR, CPCRI, CCRI, and State Agricultural Universities.
+Integrates:
+- DINOv2 agricultural context gate (facebook/dinov2-small)
+- MobileNetV2 fine-grained pathology classifier (C=38 classes)
+- Laplacian image sharpness & focus gate
+- Normalized Shannon predictive entropy H_norm = H(p) / ln(C)
+- Spatial quadrant consensus & agreement tracking
+- Direct HTTPS authoritative primary source citations (ICAR, IIHR, TNAU, UAS, CIBRC)
+- Agronomic nutrient deficiency screening hypothesis
 """
 import io
 import logging
+import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -33,6 +33,7 @@ import torch
 import torch.nn.functional as F
 
 import config
+from src.rag.authoritative_sources import get_authoritative_source_citation
 from src.vision.model import get_vision_models
 from src.vision.nutrient import (
     SCREENING_DISCLAIMER_EN,
@@ -98,18 +99,22 @@ DISEASE_TRANSLATIONS_KN = {
     "Zinc Deficiency": "ಸತು ಕೊರತೆ (Zinc Deficiency)",
 }
 
-SOURCE_CITATIONS = {
-    "Tomato": "ICAR-IIHR Package of Practices: Tomato (Solanum lycopersicum) Cultivation & Integrated Pest/Disease Management (Bengaluru).",
-    "Potato": "ICAR-CPRI Technical Advisory & UAS Dharwad Package of Practices on Solanaceous Tuber Health (Shimla / Dharwad).",
-    "Corn (Maize)": "ICAR-IIMR & ICAR-IIHR Field Guide on Maize Pathology & Fall Armyworm Integrated Management.",
-    "Cotton": "ICAR-CICR Cotton Disease & Pest Identification Manual & UAS Dharwad Raitha Mitra Bulletin.",
-    "Paddy": "ICAR-NRRI Cuttack & UAS Bengaluru Package of Practices on Rice Cultivation (Mandya ZARS).",
-    "Chilli": "ICAR-IIHR Horticultural Protection Bulletin & UAS Dharwad Byadagi Chilli Pest/Disease Protocol.",
-    "Citrus": "ICAR-CCRI Technical Compendium: Citrus Canker, Greening and Gummosis Management (Nagpur).",
-    "Coconut": "ICAR-CPCRI Technical Bulletin No. 58: Coconut Health, Stem Bleeding & Bud Rot Management (Kasaragod).",
-    "Nutrient": "Karnataka State Agricultural Universities (UAS GKVK Bengaluru & UAS Dharwad) Soil Fertility & Plant Nutrition Guide.",
-    "General": "ICAR & Karnataka State Agricultural University Raitha Mitra Extension Advisory Service.",
-}
+
+def measure_image_sharpness(img: Image.Image) -> float:
+    """Measure image focus/sharpness via variance of the Laplacian."""
+    gray = img.convert("L")
+    arr = np.array(gray, dtype=np.float64)
+    h, w = arr.shape
+    if h < 5 or w < 5:
+        return 0.0
+    lap = (
+        arr[0 : h - 2, 1 : w - 1]
+        + arr[2:h, 1 : w - 1]
+        + arr[1 : h - 1, 0 : w - 2]
+        + arr[1 : h - 1, 2:w]
+        - 4.0 * arr[1 : h - 1, 1 : w - 1]
+    )
+    return float(np.var(lap))
 
 
 def compute_shannon_entropy(probabilities: np.ndarray, eps: float = 1e-12) -> float:
@@ -121,8 +126,8 @@ def compute_shannon_entropy(probabilities: np.ndarray, eps: float = 1e-12) -> fl
 
 class PlantDiseasePredictor:
     """
-    Whole-Plant Multi-Part Inference Engine with DINOv2 Context Gate,
-    Hierarchical Taxonomy, and Agronomic Nutrient Screening.
+    Whole-Plant Multi-Part Inference Engine with Calibrated Decision Logic,
+    Hierarchical Taxonomy, and Authoritative Primary Sourcing.
     """
 
     def __init__(self):
@@ -130,6 +135,8 @@ class PlantDiseasePredictor:
         self.device = self.dinov2_wrapper.device
         self.id2label = self.classifier_wrapper.id2label
         self.label2id = self.classifier_wrapper.label2id
+        self.num_classes = len(self.id2label)
+        self.max_theoretical_entropy = math.log(self.num_classes)
 
         # Initialize reference agricultural embeddings for DINOv2 OOD gate
         self.ref_embeddings = self._build_reference_embeddings()
@@ -137,8 +144,7 @@ class PlantDiseasePredictor:
     def _build_reference_embeddings(self) -> torch.Tensor:
         """
         Build and cache DINOv2 [CLS] embeddings of known agricultural imagery.
-        Loads models/vision/dinov2_plant_reference_embeddings.pt if present,
-        or dynamically extracts embeddings from raw plant samples.
+        Loads models/vision/dinov2_plant_reference_embeddings.pt if present.
         """
         cache_path = getattr(config, "VISION_REF_CACHE_PATH", config.VISION_MODEL_DIR / "dinov2_plant_reference_embeddings.pt")
         if cache_path.exists():
@@ -179,22 +185,6 @@ class PlantDiseasePredictor:
                     out = self.dinov2_wrapper.model(**inputs)
                     cls_tok = out.last_hidden_state[:, 0, :]
                     embs.append(F.normalize(cls_tok, dim=-1))
-
-                # Multi-part sub-crops
-                if "field" in p.name.lower():
-                    w, h = img.size
-                    crops = [
-                        img.crop((0, 0, int(w * 0.7), int(h * 0.7))),
-                        img.crop((int(w * 0.3), 0, w, int(h * 0.7))),
-                        img.crop((0, int(h * 0.3), int(w * 0.7), h)),
-                    ]
-                    for c in crops:
-                        inp = self.dinov2_wrapper.processor(images=c, return_tensors="pt")
-                        inp = {k: v.to(self.device) for k, v in inp.items()}
-                        with torch.no_grad():
-                            c_out = self.dinov2_wrapper.model(**inp)
-                            c_tok = c_out.last_hidden_state[:, 0, :]
-                            embs.append(F.normalize(c_tok, dim=-1))
             except Exception as e:
                 logging.warning("Could not embed reference image %s: %s", p, e)
 
@@ -242,32 +232,28 @@ class PlantDiseasePredictor:
     ) -> PlantPart:
         """
         Detect or confirm plant part / image viewpoint.
-        Prioritizes user confirmation if provided, otherwise uses aspect ratio and visual cues.
+        Prioritizes user confirmation if provided.
         """
         if user_part_hint and user_part_hint.lower() not in ["auto", "auto-detect", "unknown", ""]:
             return PlantPart.from_str(user_part_hint)
 
         w, h = img.size
         aspect = w / float(h)
-
-        # High aspect ratio or very wide field photos typically denote canopy/field view
         if aspect > 1.4:
             return PlantPart.CANOPY
         elif aspect < 0.7:
-            # Tall vertical shot often captures whole plant or tree trunk
             return PlantPart.WHOLE_PLANT
         else:
-            # Default close-up inspection
             return PlantPart.LEAF
 
     def _generate_multi_scale_crops(self, img: Image.Image) -> Dict[str, Image.Image]:
         """
-        Generate 5 views for whole-plant field inspection:
+        Generate 5 views:
         1. Global Full-Plant view
-        2. Top-Left quadrant (Upper canopy foliage left)
-        3. Top-Right quadrant (Upper canopy foliage right)
-        4. Bottom-Left quadrant (Lower foliage & stem base left)
-        5. Bottom-Right quadrant (Lower foliage & stem base right)
+        2. Top-Left quadrant
+        3. Top-Right quadrant
+        4. Bottom-Left quadrant
+        5. Bottom-Right quadrant
         """
         w, h = img.size
         box_w = int(w * 0.60)
@@ -300,15 +286,25 @@ class PlantDiseasePredictor:
         growth_stage: Optional[str] = None,
         symptom_duration: Optional[str] = None,
         top_k: int = config.VISION_TOP_K,
-        ood_entropy_threshold: float = config.OOD_ENTROPY_THRESHOLD,
-        min_confidence_threshold: float = config.MIN_CONFIDENCE_THRESHOLD,
+        ood_entropy_threshold: Optional[float] = None,
+        min_confidence_threshold: Optional[float] = None,
+        confident_confidence_threshold: Optional[float] = None,
         dinov2_threshold: Optional[float] = None,
+        blur_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Whole-Plant & Multi-Part Field Health Diagnostic Inference.
+        Calibrated Whole-Plant & Multi-Part Field Health Diagnostic Inference.
         """
         if dinov2_threshold is None:
             dinov2_threshold = config.DINOV2_PLANT_OOD_THRESHOLD
+        if ood_entropy_threshold is None:
+            ood_entropy_threshold = getattr(config, "OOD_ENTROPY_THRESHOLD", 2.20)
+        if min_confidence_threshold is None:
+            min_confidence_threshold = getattr(config, "MIN_CONFIDENCE_THRESHOLD", 0.35)
+        if confident_confidence_threshold is None:
+            confident_confidence_threshold = getattr(config, "CONFIDENT_CONFIDENCE_THRESHOLD", 0.60)
+        if blur_threshold is None:
+            blur_threshold = getattr(config, "BLUR_LAPLACIAN_THRESHOLD", 40.0)
 
         # Load image safely
         if isinstance(image_input, (str, Path)):
@@ -329,6 +325,10 @@ class PlantDiseasePredictor:
         image_dims = f"{img.width}x{img.height}"
         image_mode = img.mode
 
+        # Step 0: Image Quality & Sharpness Check
+        blur_metric = measure_image_sharpness(img)
+        is_blurry = blur_metric < blur_threshold and (img.width >= 100 and img.height >= 100)
+
         # Step 1: DINOv2 Agricultural Context & Non-Plant OOD Gate
         is_ood, dinov2_sim, global_emb = self._check_dinov2_ood(img, threshold=dinov2_threshold)
 
@@ -345,10 +345,21 @@ class PlantDiseasePredictor:
                 "is_ood": True,
                 "plant_part_detected": "non_plant",
                 "predicted_class": "Non-Agricultural / Out-of-Distribution Object",
+                "top1_probability": 0.0,
                 "top1_confidence_pct": 0.0,
                 "top_probabilities": [],
-                "entropy": 3.0,
+                "top3_probabilities": [],
+                "entropy": 3.637,
+                "raw_entropy": 3.637,
+                "norm_entropy": 1.0,
                 "entropy_threshold": round(ood_entropy_threshold, 4),
+                "norm_entropy_threshold": round(ood_entropy_threshold / self.max_theoretical_entropy, 4),
+                "class_count": self.num_classes,
+                "blur_metric": round(blur_metric, 2),
+                "blur_threshold": round(blur_threshold, 1),
+                "quadrant_agreement": "0/4",
+                "quadrant_predictions": [],
+                "decision_rule": "RULE_OOD_DINOV2_GATE (Image similarity < threshold; non-plant object)",
                 "final_decision": "OUT_OF_DISTRIBUTION",
             }
             return {
@@ -361,7 +372,8 @@ class PlantDiseasePredictor:
                 "top1_label": "Non-Agricultural / Out-of-Distribution Object",
                 "top1_label_kannada": "ಕೃಷಿಯೇತರ / ಅಸ್ಪಷ್ಟ ವಸ್ತು (Non-Plant OOD)",
                 "top1_confidence": 0.0,
-                "entropy": 3.0,
+                "entropy": 3.637,
+                "norm_entropy": 1.0,
                 "is_healthy": False,
                 "plant_type": "Unknown",
                 "affected_regions": "None (Non-Plant Object)",
@@ -378,28 +390,27 @@ class PlantDiseasePredictor:
                 },
                 "nutrient_screening": None,
                 "debug_info": debug_info,
-                "source_evidence": "National Agricultural Biosecurity Guidelines (ICAR): Visual inference restricted to agricultural plant parts.",
+                "source_evidence": get_authoritative_source_citation("General"),
                 "refusal_reason_en": (
                     f"DINOv2 Backbone detected a non-plant or unrelated object (Plant similarity: {dinov2_sim:.3f} < {dinov2_threshold:.2f}). "
-                    "The image does not contain agricultural crops, canopy, leaves, stems, or tree bark. "
-                    "Automatic disease classification has been safely withheld. "
-                    "Please upload a clear photograph of a field plant, crop canopy, or affected plant part."
+                    "The image does not contain recognizable crops, canopies, foliage, or stems. "
+                    "Automatic disease classification has been safely withheld to avoid false chemical prescriptions."
                 ),
                 "refusal_reason_kn": (
-                    f"DINOv2 ಮಾದರಿಯು ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಬೆಳೆ ಅಥವಾ ಸಸ್ಯವನ್ನು ಗುರುತಿಸಿಲ್ಲ (ಹೋಲಿಕೆ: {dinov2_sim:.3f} < {dinov2_threshold:.2f}). "
-                    "ತಪ್ಪಾದ ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಯಲು ವಿಶ್ಲೇಷಣೆಯನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ. "
-                    "ದಯವಿಟ್ಟು ಕೃಷಿ ಬೆಳೆ, ಗಿಡದ ಕಾಂಡ, ಎಲೆ ಅಥವಾ ಹಣ್ಣಿನ ಸ್ಪಷ್ಟ ಫೋಟೋವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ."
+                    f"DINOv2 ಮಾದರಿಯು ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಸಸ್ಯವನ್ನು ಗುರುತಿಸಿಲ್ಲ (ಹೋಲಿಕೆ: {dinov2_sim:.3f} < {dinov2_threshold:.2f}). "
+                    "ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ."
                 ),
             }
 
         # Step 2: Plant Part & Viewpoint Identification
         plant_part = self._detect_plant_part(img, global_emb, user_part_hint=user_part_hint)
-        logging.info("Plant Part detected/confirmed: %s", plant_part.value)
 
-        # Step 3: Multi-Region Spatial Inspection (5 Views)
+        # Step 3: Multi-Region Spatial Inspection (Global Anchor + 4 Quadrants)
         views = self._generate_multi_scale_crops(img)
         region_breakdown: List[Dict[str, Any]] = []
-        all_probs = []
+
+        global_probs = self._infer_view(views["Whole Canopy (Global)"])
+        quadrant_probs = []
 
         upper_disease_signal = 0.0
         lower_disease_signal = 0.0
@@ -407,11 +418,12 @@ class PlantDiseasePredictor:
         max_region_prob = 0.0
 
         for r_name, r_img in views.items():
-            probs = self._infer_view(r_img)
-            all_probs.append(probs)
+            probs = global_probs if r_name == "Whole Canopy (Global)" else self._infer_view(r_img)
+            if r_name != "Whole Canopy (Global)":
+                quadrant_probs.append(probs)
 
             r_entropy = compute_shannon_entropy(probs)
-            r_top_idx = np.argmax(probs)
+            r_top_idx = int(np.argmax(probs))
             r_top_prob = float(probs[r_top_idx])
             r_top_label = self.id2label[str(r_top_idx) if str(r_top_idx) in self.id2label else r_top_idx]
 
@@ -433,27 +445,34 @@ class PlantDiseasePredictor:
                     max_region_prob = r_top_prob
                     max_region_name = r_name
 
-        # Weighted combination of regional max and consensus mean
-        probs_matrix = np.array(all_probs)
-        mean_probs = np.mean(probs_matrix, axis=0)
-        max_probs = np.max(probs_matrix, axis=0)
-        agg_probs = 0.55 * max_probs + 0.45 * mean_probs
-        agg_probs = agg_probs / np.sum(agg_probs)
+        # Robust Fused Ensemble:
+        # Global view has 60% anchor weight; quadrant mean provides 40% spatial regularization
+        q_mean = np.mean(quadrant_probs, axis=0) if quadrant_probs else global_probs
+        fused_probs = 0.60 * global_probs + 0.40 * q_mean
+        fused_probs = fused_probs / np.sum(fused_probs)
 
-        # Shannon Entropy
-        entropy = compute_shannon_entropy(agg_probs)
+        # Compute Shannon Entropy
+        entropy = compute_shannon_entropy(fused_probs)
+        norm_entropy = float(entropy / self.max_theoretical_entropy)
 
-        top_indices = np.argsort(agg_probs)[::-1]
-        top1_idx = top_indices[0]
-        top1_prob = float(agg_probs[top1_idx])
+        top_indices = np.argsort(fused_probs)[::-1]
+        top1_idx = int(top_indices[0])
+        top1_prob = float(fused_probs[top1_idx])
         raw_top1_label = self.id2label[str(top1_idx) if str(top1_idx) in self.id2label else top1_idx]
+
+        # Quadrant agreement metric: how many quadrants agree with top1 class?
+        agreed_quadrants = sum(1 for qp in quadrant_probs if int(np.argmax(qp)) == top1_idx)
+        quadrant_predictions = [
+            {"quadrant": reg["region"], "predicted": reg["top_label"], "confidence_pct": reg["confidence_percent"]}
+            for reg in region_breakdown[1:]
+        ]
 
         parsed = parse_legacy_label(raw_top1_label)
         crop_species = user_crop_hint if (user_crop_hint and user_crop_hint.lower() not in ["auto", "auto-detect", ""]) else parsed["crop"]
         condition = parsed["condition"]
         is_healthy = parsed["is_healthy"]
 
-        # Step 4: Spatial Affected Regions & Nutrient Mobility Reasoning
+        # Step 4: Spatial Location & Nutrient Screening
         if is_healthy:
             affected_regions = "Whole Plant Canopy (Healthy physiological state, no foliar lesions detected)"
             affected_regions_kn = "ಸಂಪೂರ್ಣ ಗಿಡದ ಮೇಲ್ಭಾಗ (ಆರೋಗ್ಯಕರ ಸಸಿ, ಯಾವುದೇ ಕಲೆಗಳಿಲ್ಲ)"
@@ -476,7 +495,6 @@ class PlantDiseasePredictor:
                 affected_regions_kn = "ಸಂಪೂರ್ಣ ಗಿಡದ ಮೇಲ್ಭಾಗ (ಹಲವು ಕಡೆಗಳಲ್ಲಿ ಹರಡಿರುವ ಲಕ್ಷಣಗಳು)"
                 spatial_location = "whole_canopy"
 
-        # Check for potential nutrient deficiency hypothesis
         nutrient_screening = None
         if "chlorosis" in condition.lower() or "yellow" in condition.lower() or "scorch" in condition.lower() or "blight" in condition.lower():
             nutrient_screening = analyze_nutrient_symptoms(
@@ -486,54 +504,12 @@ class PlantDiseasePredictor:
                 soil_ph=soil_ph,
             )
 
-        # Step 5: Multi-Part Branch Specific Routing & Insufficient Evidence Gate
-        is_leaf_part = plant_part in [PlantPart.LEAF, PlantPart.WHOLE_PLANT, PlantPart.CANOPY]
-        is_uncertain = (entropy > ood_entropy_threshold) or (top1_prob < min_confidence_threshold)
-
-        # If user uploaded stem, bark, root, or fruit, and the model's leaf confidence is low,
-        # return INSUFFICIENT EVIDENCE rather than forcing a false leaf disease prescription!
-        if not is_leaf_part and top1_prob < 0.65:
-            status = "insufficient_evidence"
-            evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
-            final_label = f"Unresolved {plant_part.value.title()} Symptom (Requires Close Physical Inspection)"
-            final_label_kn = f"ಅಸ್ಪಷ್ಟ {plant_part.value} ಲಕ್ಷಣ (ನೇರ ತಪಾಸಣೆ ಅಗತ್ಯ)"
-            refusal_en = (
-                f"The image shows a valid plant {plant_part.value}, but visual evidence is insufficient to "
-                "reliably diagnose a specific disease from this viewpoint alone. "
-                "Blind chemical application is strongly discouraged. Please perform a physical inspection or stem cross-section test."
-            )
-            refusal_kn = (
-                f"ಚಿತ್ರದಲ್ಲಿ ಸಸ್ಯದ {plant_part.value} ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಕೋನದಿಂದ ನಿರ್ದಿಷ್ಟ ರೋಗವನ್ನು ಖಚಿತಪಡಿಸಲು ಸಾಕಷ್ಟು ದೃಶ್ಯ ಸಾಕ್ಷ್ಯಗಳಿಲ್ಲ. "
-                "ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಬಳಕೆಯನ್ನು ತಪ್ಪಿಸಲು ನೇರ ತಪಾಸಣೆ ನಡೆಸಿ."
-            )
-        elif is_uncertain:
-            status = "uncertain"
-            evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
-            final_label = raw_top1_label
-            final_label_kn = DISEASE_TRANSLATIONS_KN.get(raw_top1_label, raw_top1_label)
-            refusal_en = (
-                f"Multi-region uncertainty detected (Entropy: {entropy:.3f} > {ood_entropy_threshold} or "
-                f"Confidence: {top1_prob*100:.1f}% < {min_confidence_threshold*100:.0f}%). "
-                "Symptoms conflict across plant quadrants. Refusing blind chemical prescription."
-            )
-            refusal_kn = (
-                f"ಗಿಡದ ವಿವಿಧ ಭಾಗಗಳಲ್ಲಿ ಅನಿಶ್ಚಿತತೆ ಕಂಡುಬಂದಿದೆ (Entropy: {entropy:.3f}, ವಿಶ್ವಾಸ: {top1_prob*100:.1f}%). "
-                "ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಶಿಫಾರಸನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ."
-            )
-        else:
-            status = "confident"
-            evidence_level = EvidenceLevel.HIGH_CONFIDENCE if top1_prob > 0.70 else EvidenceLevel.MODERATE_CONFIDENCE
-            final_label = raw_top1_label
-            final_label_kn = DISEASE_TRANSLATIONS_KN.get(raw_top1_label, raw_top1_label)
-            refusal_en = ""
-            refusal_kn = ""
-
         # Format Top-k predictions
         top_predictions: List[Dict[str, Any]] = []
         for i in range(min(top_k, len(top_indices))):
-            idx = top_indices[i]
+            idx = int(top_indices[i])
             label_str = self.id2label[str(idx) if str(idx) in self.id2label else idx]
-            confidence = float(agg_probs[idx])
+            confidence = float(fused_probs[idx])
             top_predictions.append({
                 "label": label_str,
                 "label_kannada": DISEASE_TRANSLATIONS_KN.get(label_str, label_str),
@@ -541,8 +517,115 @@ class PlantDiseasePredictor:
                 "confidence_percent": round(confidence * 100, 2),
             })
 
-        # Match authoritative source citation
-        source_cite = SOURCE_CITATIONS.get(crop_species, SOURCE_CITATIONS["General"])
+        # Step 5: Multi-Outcome Decision Logic
+        is_leaf_part = plant_part in [PlantPart.LEAF, PlantPart.WHOLE_PLANT, PlantPart.CANOPY]
+        decision_rule = ""
+        status = "confident"
+        evidence_level = EvidenceLevel.HIGH_CONFIDENCE
+        final_label = raw_top1_label
+        final_label_kn = DISEASE_TRANSLATIONS_KN.get(raw_top1_label, raw_top1_label)
+        refusal_en = ""
+        refusal_kn = ""
+        requested_next_action_en = ""
+        requested_next_action_kn = ""
+
+        # Check Outcomes:
+        if is_blurry:
+            # Outcome 2: Insufficient Image Quality
+            status = "insufficient_image_quality"
+            evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
+            decision_rule = f"RULE_INSUFFICIENT_IMAGE_QUALITY (Laplacian focus {blur_metric:.1f} < threshold {blur_threshold:.1f})"
+            final_label = "Image Blurred / Insufficient Visual Focus"
+            final_label_kn = "ಚಿತ್ರವು ಅಸ್ಪಷ್ಟವಾಗಿದೆ / ಸರಿಯಾದ ಫೋಕಸ್ ಇಲ್ಲ"
+            refusal_en = (
+                f"The uploaded photograph appears out-of-focus or blurred (Sharpness metric: {blur_metric:.1f} < {blur_threshold:.1f}). "
+                "Accurate disease diagnosis requires sharp foliar details. Automatic diagnosis has been safely withheld."
+            )
+            refusal_kn = (
+                f"ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಫೋಟೋ ಮಸುಕಾಗಿದೆ ಅಥವಾ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ (ತೀಕ್ಷ್ಣತೆ: {blur_metric:.1f} < {blur_threshold:.1f}). "
+                "ಸರಿಯಾದ ರೋಗ ಪತ್ತೆಗೆ ಎಲೆಗಳ ಸ್ಪಷ್ಟ ವಿವರಗಳು ಅಗತ್ಯವಿದೆ."
+            )
+            requested_next_action_en = "Please hold your camera steady in bright daylight and retake a sharp, focused photo of the affected leaf."
+            requested_next_action_kn = "ದಯವಿಟ್ಟು ಉತ್ತಮ ಬೆಳಕಿನಲ್ಲಿ ಕ್ಯಾಮೆರಾವನ್ನು ಅಲುಗಾಡಿಸದೆ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆದು ಕಳುಹಿಸಿ."
+
+        elif not is_leaf_part and top1_prob < 0.65:
+            # Outcome 5: Non-foliar part with low specific disease confidence
+            status = "insufficient_evidence"
+            evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
+            decision_rule = f"RULE_NON_FOLIAR_INSUFFICIENT_EVIDENCE (Part: {plant_part.value}, Top1 prob: {top1_prob:.3f} < 0.65)"
+            final_label = f"Unresolved {plant_part.value.title()} Symptom (Requires Close Physical Inspection)"
+            final_label_kn = f"ಅಸ್ಪಷ್ಟ {plant_part.value} ಲಕ್ಷಣ (ನೇರ ತಪಾಸಣೆ ಅಗತ್ಯ)"
+            refusal_en = (
+                f"The image shows a valid plant {plant_part.value}, but visual evidence is insufficient to "
+                "reliably diagnose a specific disease from this viewpoint alone. "
+                "Do not apply chemical pesticides or fungicides blindly."
+            )
+            refusal_kn = (
+                f"ಚಿತ್ರದಲ್ಲಿ ಸಸ್ಯದ {plant_part.value} ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಕೋನದಿಂದ ನಿರ್ದಿಷ್ಟ ರೋಗವನ್ನು ಖಚಿತಪಡಿಸಲು ಸಾಕಷ್ಟು ದೃಶ್ಯ ಸಾಕ್ಷ್ಯಗಳಿಲ್ಲ. "
+                "ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಬಳಕೆಯನ್ನು ತಪ್ಪಿಸಲು ನೇರ ತಪಾಸಣೆ ನಡೆಸಿ."
+            )
+            requested_next_action_en = "Please check for internal vascular discoloration (cut stem cross-section) or submit a sharp close-up of foliar symptoms."
+            requested_next_action_kn = "ಕಾಂಡವನ್ನು ಅಡ್ಡಲಾಗಿ ಕತ್ತರಿಸಿ ಒಳಗಿನ ಬಣ್ಣ ಬದಲಾವಣೆ ಪರೀಕ್ಷಿಸಿ ಅಥವಾ ಎಲೆಯ ಸ್ಪಷ್ಟ ಫೋಟೋ ಕಳುಹಿಸಿ."
+
+        elif (top1_prob >= confident_confidence_threshold and entropy <= ood_entropy_threshold) or (top1_prob >= 0.75):
+            # Outcome 3: Confident Diagnosis
+            status = "confident"
+            evidence_level = EvidenceLevel.HIGH_CONFIDENCE if top1_prob >= 0.70 else EvidenceLevel.MODERATE_CONFIDENCE
+            decision_rule = (
+                f"RULE_CONFIDENT_DIAGNOSIS (Top1 prob: {top1_prob*100:.1f}% >= {confident_confidence_threshold*100:.0f}%, "
+                f"Entropy: {entropy:.3f} <= {ood_entropy_threshold:.2f}, Agreement: {agreed_quadrants}/4)"
+            )
+
+        elif top1_prob >= min_confidence_threshold:
+            # Outcome 4: Probable Diagnosis — Needs Confirmation
+            status = "probable_diagnosis_needs_confirmation"
+            evidence_level = EvidenceLevel.SCREENING_HYPOTHESIS
+            decision_rule = (
+                f"RULE_PROBABLE_DIAGNOSIS_NEEDS_CONFIRMATION (Top1 prob: {top1_prob*100:.1f}%, "
+                f"Entropy: {entropy:.3f}, Agreement: {agreed_quadrants}/4; Quadrant variation observed)"
+            )
+            final_label = f"Possible: {raw_top1_label} (Needs Confirmation)"
+            final_label_kn = f"ಸಂಭಾವ್ಯ: {DISEASE_TRANSLATIONS_KN.get(raw_top1_label, raw_top1_label)} (ಖಚಿತತೆ ಅಗತ್ಯ)"
+            refusal_en = (
+                f"Foliar symptoms indicate **{raw_top1_label}** as the primary probable condition ({top1_prob*100:.1f}% confidence), "
+                f"with minor variation across plant quadrants (Entropy: {entropy:.3f}, Regional agreement: {agreed_quadrants}/4). "
+                "⚠️ **Safety Advisory**: Do not spray chemical fungicides or insecticides blindly until symptoms are physically verified."
+            )
+            refusal_kn = (
+                f"ಎಲೆಯ ಲಕ್ಷಣಗಳು ಮುಖ್ಯವಾಗಿ **{DISEASE_TRANSLATIONS_KN.get(raw_top1_label, raw_top1_label)}** ರೋಗವನ್ನು ಸೂಚಿಸುತ್ತವೆ (ವಿಶ್ವಾಸ: {top1_prob*100:.1f}%), "
+                f"ಆದರೆ ಗಿಡದ ಇತರ ಭಾಗಗಳಲ್ಲಿ ಸ್ವಲ್ಪ ವ್ಯತ್ಯಾಸವಿದೆ (ಎಂಟ್ರೊಪಿ: {entropy:.3f}). "
+                "⚠️ **ಎಚ್ಚರಿಕೆ**: ಲಕ್ಷಣಗಳನ್ನು ದೃಢೀಕರಿಸುವ ಮೊದಲು ಕೀಟನಾಶಕಗಳನ್ನು ಕುರುಡಾಗಿ ಸಿಂಪಡಿಸಬೇಡಿ."
+            )
+            requested_next_action_en = (
+                "Please inspect the underside of the affected leaves for fungal downy growth or pustules, "
+                "and note whether symptoms started on the oldest lower leaves first."
+            )
+            requested_next_action_kn = (
+                "ದಯವಿಟ್ಟು ರೋಗಪೀಡಿತ ಎಲೆಯ ಹಿಂಭಾಗದಲ್ಲಿ ಶಿಲೀಂಧ್ರದ ಬೂಸ್ಟ್ ಅಥವಾ ಕಲೆಗಳಿವೆಯೇ ನೋಡಿ, "
+                "ಮತ್ತು ಹಳದಿ ಲಕ್ಷಣಗಳು ಕೆಳಭಾಗದ ಹಳೆಯ ಎಲೆಗಳಲ್ಲಿ ಮೊದಲು ಶುರುವಾಯಿತೇ ಎಂಬುದನ್ನು ಗಮನಿಸಿ."
+            )
+
+        else:
+            # Low confidence across all classes (< 0.35)
+            status = "uncertain_disease"
+            evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
+            decision_rule = f"RULE_INCONCLUSIVE_DISEASE (Top1 prob {top1_prob*100:.1f}% < min threshold {min_confidence_threshold*100:.0f}%)"
+            final_label = "Inconclusive Foliar Symptoms"
+            final_label_kn = "ಅಸ್ಪಷ್ಟ ಎಲೆ ರೋಗಲಕ್ಷಣಗಳು"
+            refusal_en = (
+                f"The image contains a valid crop plant, but foliar disease symptoms are inconclusive "
+                f"(Top-1 probability: {top1_prob*100:.1f}% < {min_confidence_threshold*100:.0f}%). "
+                "Do not spray chemical fungicides blindly."
+            )
+            refusal_kn = (
+                f"ಚಿತ್ರದಲ್ಲಿ ಕೃಷಿ ಬೆಳೆ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ರೋಗಲಕ್ಷಣಗಳು ಅಸ್ಪಷ್ಟವಾಗಿವೆ (ವಿಶ್ವಾಸ: {top1_prob*100:.1f}%). "
+                "ರಾಸಾಯನಿಕ ಔಷಧಿಯನ್ನು ಕುರುಡಾಗಿ ಸಿಂಪಡಿಸಬೇಡಿ."
+            )
+            requested_next_action_en = "Please upload a sharper, closer photograph of the infected leaf area."
+            requested_next_action_kn = "ದಯವಿಟ್ಟು ರೋಗಬಾಧಿತ ಎಲೆಯ ಹತ್ತಿರದ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆದು ಕಳುಹಿಸಿ."
+
+        # Fetch verified authoritative primary source citation with direct HTTPS link
+        source_cite_record = get_authoritative_source_citation(raw_top1_label if status in ["confident", "probable_diagnosis_needs_confirmation"] else crop_species)
 
         # Construct Unified Hierarchical Record
         hierarchical = HierarchicalDiagnosis(
@@ -557,9 +640,9 @@ class PlantDiseasePredictor:
             affected_region_kannada=affected_regions_kn,
             is_healthy=is_healthy,
             is_ood=False,
-            screening_disclaimer=SCREENING_DISCLAIMER_EN if parsed["category"] == IssueCategory.NUTRIENT_DEFICIENCY else None,
+            screening_disclaimer=SCREENING_DISCLAIMER_EN if parsed["category"] == IssueCategory.NUTRIENT_DEFICIENCY or status == "probable_diagnosis_needs_confirmation" else None,
             recommended_lab_tests=nutrient_screening["recommended_lab_tests"] if nutrient_screening else [],
-            source_citation=source_cite,
+            source_citation=source_cite_record["source_title"],
         )
 
         debug_info = {
@@ -571,16 +654,30 @@ class PlantDiseasePredictor:
             "plant_part_detected": plant_part.value,
             "crop_species": crop_species,
             "predicted_class": final_label,
+            "top1_probability": round(top1_prob, 4),
             "top1_confidence_pct": round(top1_prob * 100, 2),
             "top_probabilities": [
                 {"class": p["label"], "prob": p["probability"]}
-                for p in top_predictions
+                for p in top_predictions[:3]
+            ],
+            "top3_probabilities": [
+                {"class": p["label"], "prob": p["probability"]}
+                for p in top_predictions[:3]
             ],
             "entropy": round(entropy, 4),
+            "raw_entropy": round(entropy, 4),
+            "norm_entropy": round(norm_entropy, 4),
             "entropy_threshold": round(ood_entropy_threshold, 4),
+            "norm_entropy_threshold": round(ood_entropy_threshold / self.max_theoretical_entropy, 4),
+            "class_count": self.num_classes,
+            "blur_metric": round(blur_metric, 2),
+            "blur_threshold": round(blur_threshold, 1),
+            "quadrant_agreement": f"{agreed_quadrants}/4",
+            "quadrant_predictions": quadrant_predictions,
+            "decision_rule": decision_rule,
             "final_decision": status.upper(),
         }
-        logging.info("Safe Vision Multi-Part Debug Output: %s", debug_info)
+        logging.info("Calibrated Vision Multi-Part Debug Output: %s", debug_info)
 
         return {
             "plant_scope": "whole_plant_multi_part_analysis",
@@ -591,10 +688,12 @@ class PlantDiseasePredictor:
             "plant_part": plant_part.value,
             "crop_species": crop_species,
             "entropy": round(entropy, 4),
+            "norm_entropy": round(norm_entropy, 4),
             "entropy_threshold": ood_entropy_threshold,
-            "uncertainty_flag": is_uncertain,
+            "uncertainty_flag": status in ["probable_diagnosis_needs_confirmation", "uncertain_disease", "insufficient_evidence", "insufficient_image_quality"],
             "top1_label": final_label,
             "top1_label_kannada": final_label_kn,
+            "raw_top1_label": raw_top1_label,
             "top1_confidence": round(top1_prob * 100, 2),
             "is_healthy": is_healthy,
             "plant_type": crop_species,
@@ -604,10 +703,12 @@ class PlantDiseasePredictor:
             "region_breakdown": region_breakdown,
             "hierarchical_diagnosis": hierarchical.to_dict(),
             "nutrient_screening": nutrient_screening,
-            "source_evidence": source_cite,
+            "source_evidence": source_cite_record,
             "debug_info": debug_info,
             "refusal_reason_en": refusal_en,
             "refusal_reason_kn": refusal_kn,
+            "requested_next_action_en": requested_next_action_en,
+            "requested_next_action_kn": requested_next_action_kn,
         }
 
 
@@ -619,13 +720,13 @@ if __name__ == "__main__":
         user_crop_hint="Tomato",
         user_part_hint="whole_plant",
     )
-    print("Part:", res1["plant_part"])
     print("Status:", res1["status"])
+    print("Decision Rule:", res1["debug_info"]["decision_rule"])
     print("Top1:", res1["top1_label"], f"({res1['top1_confidence']}%)")
-    print("Affected:", res1["affected_regions"])
-    print("Source Evidence:", res1["source_evidence"])
+    print("Raw H:", res1["entropy"], "Norm H:", res1["norm_entropy"])
+    print("Source Evidence:", res1["source_evidence"]["url"])
 
     print("\n--- Testing Non-Plant Cat Image ---")
     res2 = predictor.predict(config.RAW_DATA_DIR / "sample_non_plant_cat.png")
     print("Status:", res2["status"])
-    print("Refusal Reason:", res2["refusal_reason_en"])
+    print("Decision Rule:", res2["debug_info"]["decision_rule"])

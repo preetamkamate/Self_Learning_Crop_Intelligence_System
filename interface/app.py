@@ -316,9 +316,11 @@ for idx, msg in enumerate(st.session_state.messages):
                     if vision:
                         status = vision.get("status")
                         entropy = vision.get("entropy", 0.0)
+                        norm_entropy = vision.get("norm_entropy", 0.0)
                         dino_sim = vision.get("dinov2_plant_similarity", 1.0)
                         dino_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
                         aff_reg = vision.get("affected_regions", "Whole Canopy")
+                        dbg = vision.get("debug_info", {})
 
                         if status == "out_of_distribution":
                             st.markdown(
@@ -326,6 +328,14 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"Refusal Gate Active: {vision.get('top1_label')}")
+                        elif status == "insufficient_image_quality":
+                            b_val = dbg.get("blur_metric", 0.0)
+                            b_thresh = dbg.get("blur_threshold", 40.0)
+                            st.markdown(
+                                f'<span class="metric-badge badge-ood">🔍 BLURRED / LOW FOCUS (Sharpness={b_val:.1f} < {b_thresh:.1f})</span>',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption("Foliar details are blurred or out of focus. Please hold steady in bright daylight and retake.")
                         elif status == "insufficient_evidence":
                             v_part = vision.get("plant_part", "plant part")
                             st.markdown(
@@ -333,9 +343,18 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.caption("Valid plant detected, but symptoms are ambiguous. Do not apply chemicals without physical check.")
-                        elif status == "uncertain":
+                        elif status == "probable_diagnosis_needs_confirmation":
                             st.markdown(
-                                f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN (H={entropy:.3f})</span>',
+                                f'<span class="metric-badge badge-module">🔬 PROBABLE DIAGNOSIS (NEEDS CONFIRMATION)</span>',
+                                unsafe_allow_html=True,
+                            )
+                            st.write(f"**Top Candidate**: {vision.get('top1_label')}")
+                            st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}` (Norm: `{norm_entropy:.3f}`)")
+                            st.write(f"**Affected Region**: 📍 *{aff_reg}*")
+                            st.caption("⚠️ Symptoms observed with quadrant variation. Physical confirmation advised before spraying.")
+                        elif status in ["uncertain_disease", "uncertain"]:
+                            st.markdown(
+                                f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS (H={entropy:.3f})</span>',
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"Conflict across regions. Top1: {vision.get('top1_label')} ({vision.get('top1_confidence')}%)")
@@ -348,16 +367,26 @@ for idx, msg in enumerate(st.session_state.messages):
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
 
-                        # Hierarchical & Source Evidence Cards
+                        # Hierarchical Diagnosis Card
                         hierarchical = vision.get("hierarchical_diagnosis")
                         if hierarchical:
                             st.markdown(
                                 f"**Hierarchy**: `{hierarchical.get('crop_species')}` ➔ `{hierarchical.get('plant_part')}` ➔ `{hierarchical.get('issue_category')}` "
                                 f"(`{hierarchical.get('evidence_level')}`)"
                             )
+
+                        # Authoritative Direct HTTPS Source Reference Card (Requirements 9 & 10)
                         source_ev = vision.get("source_evidence")
                         if source_ev:
-                            st.caption(f"📚 **Source Evidence**: {source_ev}")
+                            if isinstance(source_ev, dict):
+                                st.markdown("---")
+                                st.markdown(f"📚 **Authoritative Source**: [{source_ev.get('source_title', 'Agricultural Extension Protocol')}]({source_ev.get('url', 'https://icar.org.in')})")
+                                st.caption(f"🏛️ **Organization**: {source_ev.get('organization', 'ICAR & Agricultural Extension')}")
+                                st.caption(f"🔗 **Direct HTTPS Link**: [{source_ev.get('url')}]({source_ev.get('url')})")
+                                st.caption(f"📅 **Access Date**: {source_ev.get('access_date', 'November 2026')}")
+                                st.caption(f"📋 **Supports**: {source_ev.get('supported_recommendations', 'Diagnostic & Treatment Package')}")
+                            else:
+                                st.caption(f"📚 **Source Evidence**: {source_ev}")
 
                         # Nutrient Screening Expander
                         nut_screen = vision.get("nutrient_screening")
@@ -370,18 +399,37 @@ for idx, msg in enumerate(st.session_state.messages):
                                     st.caption(f"• **{c['name']}**: {c['visual_symptoms'][:100]}... (Mobility: {c['mobility']})")
                                 st.warning("⚠️ Visual screening hypothesis only. Confirm via certified soil and tissue tests.")
 
-                        dbg = vision.get("debug_info")
+                        # Safe Development Debug Panel (Requirement 7)
                         if dbg:
-                            with st.expander("🛠️ Safe Vision Debug Telemetry", expanded=False):
-                                st.caption(f"• **Dimensions**: `{dbg.get('image_dimensions')}` (Mode: `{dbg.get('image_mode')}`)")
-                                st.caption(f"• **DINOv2 Match**: `{dbg.get('dinov2_similarity')}` | Threshold: `{dbg.get('dinov2_threshold')}`")
-                                st.caption(f"• **OOD Decision**: `{'OOD (Rejected)' if dbg.get('is_ood') else 'In-Distribution (Accepted)'}`")
-                                st.caption(f"• **Predicted Class**: `{dbg.get('predicted_class')}` ({dbg.get('top1_confidence_pct')}%)")
-                                st.caption(f"• **Entropy**: `{dbg.get('entropy')}` | Threshold: `{dbg.get('entropy_threshold')}`")
-                                st.caption(f"• **Final Decision**: `{dbg.get('final_decision')}`")
-                                top_p = dbg.get("top_probabilities", [])
-                                if top_p:
-                                    st.caption("• **Top Probabilities**: " + ", ".join([f"{tp.get('class')}: {tp.get('prob')*100:.1f}%" for tp in top_p]))
+                            with st.expander("🛠️ Development Debug Panel (Vision Decision Telemetry)", expanded=False):
+                                st.markdown(f"**Exact Decision Rule**: `{dbg.get('decision_rule', 'N/A')}`")
+                                st.markdown(f"**Final Decision State**: `{dbg.get('final_decision', 'N/A')}`")
+
+                                d_col1, d_col2 = st.columns(2)
+                                with d_col1:
+                                    st.caption(f"• **Raw Shannon Entropy H(p)**: `{dbg.get('raw_entropy', dbg.get('entropy', 0.0)):.4f}`")
+                                    st.caption(f"• **Normalized Entropy Ĥ(p)**: `{dbg.get('norm_entropy', 0.0):.4f}`")
+                                    st.caption(f"• **Class Count (C)**: `{dbg.get('class_count', 38)}` (Max theoretical H = 3.638)")
+                                    st.caption(f"• **Applied Entropy Threshold**: `{dbg.get('entropy_threshold', 2.20):.2f}` (Norm: `{dbg.get('norm_entropy_threshold', 0.605):.3f}`)")
+                                    st.caption(f"• **Quadrant Agreement**: `{dbg.get('quadrant_agreement', 'N/A')}`")
+                                with d_col2:
+                                    st.caption(f"• **Top-1 Probability**: `{dbg.get('top1_confidence_pct', 0.0):.1f}%` ({dbg.get('predicted_class', 'N/A')})")
+                                    st.caption(f"• **DINOv2 Plant Similarity**: `{dbg.get('dinov2_similarity', 0.0):.4f}` (Threshold: `{dbg.get('dinov2_threshold', 0.16):.2f}`)")
+                                    st.caption(f"• **Focus Sharpness (Laplacian)**: `{dbg.get('blur_metric', 0.0):.1f}` (Threshold: `{dbg.get('blur_threshold', 40.0):.1f}`)")
+                                    st.caption(f"• **Image Dimensions & Mode**: `{dbg.get('image_dimensions')}` ({dbg.get('image_mode')})")
+                                    st.caption(f"• **OOD Gate Result**: `{'OOD (Non-Plant)' if dbg.get('is_ood') else 'In-Distribution (Plant Recognized)'}`")
+
+                                top3 = dbg.get("top3_probabilities", dbg.get("top_probabilities", []))
+                                if top3:
+                                    st.markdown("**Top-3 Probabilities:**")
+                                    for t in top3:
+                                        st.caption(f"  - `{t.get('class')}`: **{t.get('prob')*100:.2f}%**")
+
+                                q_preds = dbg.get("quadrant_predictions", [])
+                                if q_preds:
+                                    st.markdown("**Quadrant Predictions:**")
+                                    for q in q_preds:
+                                        st.caption(f"  - **{q.get('quadrant')}**: {q.get('predicted')} ({q.get('confidence_pct')}%)")
 
                         breakdown = vision.get("region_breakdown", [])
                         if breakdown:
@@ -453,7 +501,7 @@ with st.expander("📷 Upload Plant Photo (Whole-Plant Field View, Canopy, Stem,
     )
     # Quick Test Images
     st.markdown("**Or test with benchmark field & leaf samples:**")
-    samp_cols = st.columns(5)
+    samp_cols = st.columns(6)
     if samp_cols[0].button("🌱 Field Tomato", key="btn_field_tomato"):
         p = config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg"
         if p.exists():
@@ -472,13 +520,19 @@ with st.expander("📷 Upload Plant Photo (Whole-Plant Field View, Canopy, Stem,
             sample_image_bytes = open(p, "rb").read()
             sample_image_label = "Please identify the disease on this tomato plant."
             sample_image_trigger = True
-    if samp_cols[3].button("🐱 Non-Plant (Cat)", key="btn_cat"):
+    if samp_cols[3].button("🔍 Blurry Leaf", key="btn_blurry"):
+        p = config.DATA_DIR / "processed" / "eval_samples" / "sample_blurred_leaf.jpg"
+        if p.exists():
+            sample_image_bytes = open(p, "rb").read()
+            sample_image_label = "Please analyze this blurred plant photograph."
+            sample_image_trigger = True
+    if samp_cols[4].button("🐱 Non-Plant (Cat)", key="btn_cat"):
         p = config.RAW_DATA_DIR / "sample_non_plant_cat.png"
         if p.exists():
             sample_image_bytes = open(p, "rb").read()
             sample_image_label = "Please analyze this image."
             sample_image_trigger = True
-    if samp_cols[4].button("⚠️ Noise (OOD)", key="btn_ood"):
+    if samp_cols[5].button("⚠️ Noise (OOD)", key="btn_ood"):
         import numpy as np
         noise = (np.random.rand(224, 224, 3) * 255).astype("uint8")
         buf = io.BytesIO()

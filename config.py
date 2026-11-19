@@ -41,8 +41,13 @@ DINOV2_MODEL_ID = os.getenv("DINOV2_MODEL_ID", "facebook/dinov2-small")
 # Configurable DINOv2 agricultural similarity gate (default: 0.16; non-plants <= 0.13, plant parts >= 0.17)
 DINOV2_PLANT_OOD_THRESHOLD = float(os.getenv("DINOV2_PLANT_OOD_THRESHOLD", "0.16"))
 VISION_MODEL_ID = os.getenv("VISION_MODEL_ID", "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification")
-OOD_ENTROPY_THRESHOLD = float(os.getenv("OOD_ENTROPY_THRESHOLD", "1.5"))
-MIN_CONFIDENCE_THRESHOLD = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.40"))
+# Calibrated Shannon Predictive Entropy thresholds (C=38 classes; max theoretical ln(38) = 3.6375)
+# Raw threshold 2.20 corresponds to normalized entropy H_norm <= 0.605
+OOD_ENTROPY_THRESHOLD = float(os.getenv("OOD_ENTROPY_THRESHOLD", "2.20"))
+NORM_ENTROPY_THRESHOLD = float(os.getenv("NORM_ENTROPY_THRESHOLD", "0.605"))
+BLUR_LAPLACIAN_THRESHOLD = float(os.getenv("BLUR_LAPLACIAN_THRESHOLD", "40.0"))
+MIN_CONFIDENCE_THRESHOLD = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.35"))
+CONFIDENT_CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENT_CONFIDENCE_THRESHOLD", "0.60"))
 VISION_TOP_K = int(os.getenv("VISION_TOP_K", "3"))
 VISION_REF_CACHE_PATH = VISION_MODEL_DIR / "dinov2_plant_reference_embeddings.pt"
 

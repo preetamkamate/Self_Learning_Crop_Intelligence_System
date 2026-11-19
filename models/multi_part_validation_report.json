@@ -17,7 +17,7 @@
     "num_samples": 1,
     "avg_dinov2_similarity": 0.9397,
     "ood_rejection_percent": 0.0,
-    "dominant_status": "uncertain",
+    "dominant_status": "confident",
     "success_rate_percent": 100.0
   },
   "stem": {
@@ -52,7 +52,7 @@
     "num_samples": 1,
     "avg_dinov2_similarity": 1.0,
     "ood_rejection_percent": 0.0,
-    "dominant_status": "uncertain",
+    "dominant_status": "confident",
     "success_rate_percent": 100.0
   },
   "healthy": {

@@ -92,10 +92,12 @@ class AdvisorySynthesisService:
             "2. CONCISE & SCANNABLE: Keep each language advisory between 120 and 180 words. Use clean Markdown with short, easily readable bullet points (e.g., Diagnosis, Key Symptoms, Immediate Action/Dosage, Cultural Management).\n"
             "3. HONESTY & REFUSAL GATING:\n"
             "   - If Vision Status is 'OUT_OF_DISTRIBUTION' (non-plant image detected), do NOT guess a crop disease. Politely inform the farmer that no plant or crop canopy was recognized (DINOv2 similarity failed), and advise uploading an actual plant photo.\n"
+            "   - If Vision Status is 'INSUFFICIENT_IMAGE_QUALITY' (blurry/out-of-focus image), advise farmer to hold steady and retake a sharp photo in daylight.\n"
             "   - If Vision Status is 'INSUFFICIENT_EVIDENCE' (e.g. non-leaf part or unconfirmed symptoms), do NOT force a chemical prescription. Explain that visual cues are insufficient and recommend physical inspection (such as stem cross-section or root wash).\n"
-            "   - If Vision Status is 'UNCERTAIN' (high entropy / conflicting symptoms across plant quadrants), clearly state the uncertainty, explain what symptoms conflict, and advise taking a closer, well-lit photo of the leaf or stem rather than spraying blind chemicals.\n"
+            "   - If Vision Status is 'PROBABLE_DIAGNOSIS_NEEDS_CONFIRMATION' (valid crop with localized or quadrant variation), return 'Possible diagnosis—needs confirmation', list top 3 candidate diagnoses with probabilities, requested next photo or field information, caution 'Do not spray chemical fungicides or insecticides blindly until symptoms are physically verified', and provide safe organic/cultural first-aid.\n"
+            "   - If Vision Status is 'UNCERTAIN' (conflicting symptoms across plant quadrants), clearly state the uncertainty, and advise taking a closer, well-lit photo rather than spraying blind chemicals.\n"
             "   - For nutrient deficiencies, clearly state that visual screening is a hypothesis, not a confirmed diagnosis, and advise soil NPK/pH and leaf tissue testing.\n"
-            "4. TREATMENT SPECIFICITY & SOURCE EVIDENCE: For confirmed diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives (e.g. Neem Oil 10,000 ppm @ 3 ml/L or Pseudomonas fluorescens @ 5 g/L). Always cite the primary ICAR/IIHR/SAU source. Never fabricate chemical doses.\n"
+            "4. TREATMENT SPECIFICITY & AUTHORITATIVE SOURCE CITATION: For confirmed or probable diseases, provide exact ICAR / IIHR recommended chemical dosages (with active ingredients, e.g. Mancozeb 75% WP @ 2.5 g/L) along with bio-control/organic alternatives. Always display the authoritative primary source with title, organization, direct HTTPS link, access date, and supported recommendation. Never fabricate chemical doses.\n"
             "5. DUAL BILINGUAL OUTPUT FORMAT:\n"
             "   You must provide your response in EXACTLY two sections separated by markers:\n"
             "   ---ENGLISH---\n"
@@ -140,22 +142,35 @@ class AdvisorySynthesisService:
             v_label_kn = vision.get("top1_label_kannada", v_label)
             v_conf = vision.get("top1_confidence", 0.0)
             v_entropy = vision.get("entropy", 0.0)
+            v_norm_h = vision.get("norm_entropy", 0.0)
             v_dino = vision.get("dinov2_plant_similarity", 0.0)
             v_reg = vision.get("affected_regions", "Whole Canopy")
             v_healthy = vision.get("is_healthy", False)
             v_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
             v_part = vision.get("plant_part", "leaf")
-            v_source_cite = vision.get("source_evidence", "ICAR Guidelines")
+            v_source = vision.get("source_evidence")
+            v_preds = vision.get("predictions", [])
+            top3_str = ", ".join([f"{p.get('label')}: {p.get('confidence_percent')}%" for p in v_preds[:3]])
+            next_action = vision.get("requested_next_action_en", "")
+
+            source_str = ""
+            if isinstance(v_source, dict):
+                source_str = f"[{v_source.get('source_title')}]({v_source.get('url')}) by {v_source.get('organization')}, accessed {v_source.get('access_date')}"
+            else:
+                source_str = str(v_source)
+
             vision_block = (
                 f"- Status: {v_status.upper()}\n"
                 f"- Plant Part / Viewpoint: {v_part.upper()}\n"
                 f"- Top Condition: {v_label} (Kannada: {v_label_kn})\n"
-                f"- Confidence: {v_conf:.1f}%\n"
-                f"- Shannon Entropy H(p): {v_entropy:.3f} (Threshold: >1.80 is uncertain)\n"
+                f"- Top-1 Confidence: {v_conf:.1f}%\n"
+                f"- Top-3 Candidates: {top3_str}\n"
+                f"- Raw Shannon Entropy H(p): {v_entropy:.3f} | Normalized Entropy: {v_norm_h:.3f}\n"
                 f"- DINOv2 Plant Match: {v_dino:.3f} (Threshold: <{v_thresh:.2f} is Non-Plant OOD)\n"
                 f"- Affected Plant Regions: {v_reg}\n"
                 f"- Healthy Crop Flag: {v_healthy}\n"
-                f"- Sourced Authority: {v_source_cite}"
+                f"- Requested Next Action: {next_action}\n"
+                f"- Authoritative Sourced Reference: {source_str}"
             )
         else:
             vision_block = "None (Vision module did not run in this turn)."
@@ -334,6 +349,37 @@ class AdvisorySynthesisService:
             "cultural_kn": cultural_kn,
         }
 
+    def _format_source_evidence_markdown(self, source_ev: Any, lang: str = "en") -> str:
+        """Format authoritative primary source details into clean, clickable Markdown."""
+        if not source_ev:
+            return ""
+        if isinstance(source_ev, str):
+            return f"📚 **Source Evidence**: {source_ev}" if lang == "en" else f"📚 **ಮೂಲ ಪ್ರಾಧಿಕಾರ**: {source_ev}"
+
+        title = source_ev.get("source_title", "ICAR / State Agricultural University Package of Practices")
+        org = source_ev.get("organization", "Indian Council of Agricultural Research & State Extension")
+        url = source_ev.get("url", "https://icar.org.in")
+        access_date = source_ev.get("access_date", "November 2026")
+        recs = source_ev.get("supported_recommendations", "Integrated Pest and Disease Management Protocol")
+
+        if lang == "kn":
+            return (
+                f"📚 **ಅಧಿಕೃತ ಮೂಲ ಸಾಕ್ಷ್ಯ (Authoritative Source Evidence)**:\n"
+                f"- **ಮಾರ್ಗದರ್ಶಿ**: [{title}]({url})\n"
+                f"- **ಸಂಸ್ಥೆ**: {org}\n"
+                f"- **ನೇರ HTTPS ಲಿಂಕ್**: [{url}]({url})\n"
+                f"- **ಪರಿಶೀಲಿಸಿದ ದಿನಾಂಕ**: {access_date}\n"
+                f"- **ಶಿಫಾರಸು ವಿವರ**: {recs}"
+            )
+        return (
+            f"📚 **Authoritative Source Evidence**:\n"
+            f"- **Source Title**: [{title}]({url})\n"
+            f"- **Organization**: {org}\n"
+            f"- **Direct HTTPS Link**: [{url}]({url})\n"
+            f"- **Access Date**: {access_date}\n"
+            f"- **Supported Recommendation**: {recs}"
+        )
+
     def _local_fallback_synthesis(
         self,
         router_payload: Dict[str, Any],
@@ -414,7 +460,7 @@ class AdvisorySynthesisService:
         if (intent == "disease_diagnosis" and vision) or (vision and not is_followup):
             status = vision.get("status", "confident") if vision else "confident"
 
-            # OOD Non-Plant Refusal
+            # 1. OOD Non-Plant Refusal
             if status == "out_of_distribution":
                 dino_sim = vision.get("dinov2_plant_similarity", 0.0)
                 dino_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
@@ -434,18 +480,47 @@ class AdvisorySynthesisService:
                 )
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-            # Insufficient Evidence Gate (e.g. non-leaf part with low confidence)
+            # 2. Insufficient Image Quality (Blur / Focus gate)
+            if status == "insufficient_image_quality":
+                dbg = vision.get("debug_info", {})
+                b_val = dbg.get("blur_metric", vision.get("blur_metric", 0.0))
+                b_thresh = dbg.get("blur_threshold", getattr(config, "BLUR_LAPLACIAN_THRESHOLD", 40.0))
+                next_en = vision.get("requested_next_action_en", "Please hold camera steady in daylight and retake a sharp photo.")
+                next_kn = vision.get("requested_next_action_kn", "ದಯವಿಟ್ಟು ಕ್ಯಾಮೆರಾವನ್ನು ಅಲುಗಾಡಿಸದೆ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆದು ಕಳುಹಿಸಿ.")
+                en = (
+                    f"⚠️ **Insufficient Image Quality (Blurred / Out of Focus)**\n\n"
+                    f"- **Focus Sharpness Metric**: `{b_val:.1f}` (Minimum threshold: `{b_thresh:.1f}`)\n"
+                    f"- **Diagnostic Status**: The photograph is out-of-focus. Fine foliar lesion textures and diagnostic pathogen margins cannot be reliably differentiated.\n"
+                    f"- **Safety Notice**: Automatic disease classification was safely withheld to prevent incorrect chemical prescription.\n\n"
+                    f"👉 **Requested Next Action**:\n{next_en}"
+                )
+                kn = (
+                    f"⚠️ **ಚಿತ್ರದ ಗುಣಮಟ್ಟ ಸಾಲದು (ಮಸುಕಾಗಿದೆ / ಸರಿಯಾದ ಫೋಕಸ್ ಇಲ್ಲ)**\n\n"
+                    f"- **ಫೋಕಸ್ ತೀಕ್ಷ್ಣತೆ**: `{b_val:.1f}` (ಕನಿಷ್ಠ ಅಗತ್ಯ: `{b_thresh:.1f}`)\n"
+                    f"- **ಸ್ಥಿತಿ**: ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಫೋಟೋ ಮಸುಕಾಗಿದೆ. ಎಲೆಯ ಸೂಕ್ಷ್ಮ ರೋಗಲಕ್ಷಣಗಳು ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ.\n"
+                    f"- **ಸೂಚನೆ**: ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ.\n\n"
+                    f"👉 **ಮುಂದಿನ ಕ್ರಮ**:\n{next_kn}"
+                )
+                return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
+
+            # 3. Insufficient Visual Evidence Gate (Non-foliar part with low confidence)
             if status == "insufficient_evidence":
                 plant_part = vision.get("plant_part", "plant part")
+                next_en = vision.get("requested_next_action_en", "Please check internal vascular discoloration or submit a foliar close-up.")
+                next_kn = vision.get("requested_next_action_kn", "ಕಾಂಡವನ್ನು ಅಡ್ಡಲಾಗಿ ಕತ್ತರಿಸಿ ಬಣ್ಣ ಬದಲಾವಣೆ ಪರೀಕ್ಷಿಸಿ ಅಥವಾ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ.")
+                source_box_en = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="en")
+                source_box_kn = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="kn")
                 en = (
                     f"⚠️ **Insufficient Visual Evidence ({plant_part.title()})**\n\n"
                     f"- **Plant Context**: The DINOv2 backbone confirmed a genuine plant ({plant_part}), but visual symptoms are ambiguous.\n"
                     f"- **Safety Gate**: Automatic disease prescription was withheld to prevent unjustified chemical application.\n"
                     f"- **Recommended Diagnostic Checks**:\n"
-                    f"  1. For stem/trunk: Check for sap oozing, bark fissures, or internal vascular discoloration (vascular browning).\n"
-                    f"  2. For roots: Wash roots gently to inspect for root-knot nematode galls or waterlogged rotting.\n"
-                    f"  3. For foliage: Capture a well-illuminated close-up photo of the transition margin between healthy and affected tissue.\n\n"
-                    f"📚 **Source Evidence**: {vision.get('source_evidence', 'ICAR Integrated Pest & Disease Diagnostic Protocol.')}"
+                    f"  1. For stem/trunk: Check for sap oozing, bark fissures, or internal vascular browning.\n"
+                    f"  2. For roots: Wash roots gently to inspect for nematode root galls or rotting.\n"
+                    f"  3. For foliage: Capture a sharp close-up photo of the transition margin between healthy and affected tissue.\n\n"
+                    f"⚠️ **Safety Advisory**: Do not spray chemical fungicides or insecticides blindly without physical confirmation.\n\n"
+                    f"👉 **Next Step**: {next_en}\n\n"
+                    f"{source_box_en}"
                 )
                 kn = (
                     f"⚠️ **ಅಸ್ಪಷ್ಟ ದೃಶ್ಯ ಸಾಕ್ಷ್ಯ ({plant_part})**\n\n"
@@ -455,40 +530,106 @@ class AdvisorySynthesisService:
                     f"  1. ಕಾಂಡ/ತೊಗಟೆ: ಕಪ್ಪು ದ್ರವ ಸೋರುತ್ತಿದೆಯೇ ಅಥವಾ ಬಿರುಕು ಬಿಟ್ಟಿದೆಯೇ ಗಮನಿಸಿ.\n"
                     f"  2. ಬೇರುಗಳು: ಬೇರುಗಳಲ್ಲಿ ಗಂಟುಗಳು (Nematodes) ಅಥವಾ ಕೊಳೆತ ಲಕ್ಷಣಗಳನ್ನು ಪರೀಕ್ಷಿಸಿ.\n"
                     f"  3. ಎಲೆಗಳು: ರೋಗಪೀಡಿತ ಮತ್ತು ಹಸಿರು ಎಲೆಯ ಅಂಚಿನ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆಯಿರಿ.\n\n"
-                    f"📚 **ಮೂಲ ಪ್ರಾಧಿಕಾರ**: {vision.get('source_evidence', 'ICAR ಕೃಷಿ ರೋಗನಿರ್ಣಯ ಮಾರ್ಗಸೂಚಿ.')}"
+                    f"⚠️ **ಸುರಕ್ಷತಾ ಎಚ್ಚರಿಕೆ**: ನೇರ ತಪಾಸಣೆ ನಡೆಸದೆ ಕೀಟನಾಶಕಗಳನ್ನು ಕುರುಡಾಗಿ ಸಿಂಪಡಿಸಬೇಡಿ.\n\n"
+                    f"👉 **ಮುಂದಿನ ಕ್ರಮ**: {next_kn}\n\n"
+                    f"{source_box_kn}"
                 )
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-            # Uncertain / Conflicted Multi-Quadrant Pattern
-            if status == "uncertain":
+            # 4. Probable Diagnosis — Needs Confirmation
+            if status == "probable_diagnosis_needs_confirmation":
+                top1_en = vision.get("raw_top1_label", vision.get("top1_label", "Unknown Condition"))
+                top1_kn = vision.get("top1_label_kannada", top1_en)
+                conf = vision.get("top1_confidence", 0.0)
+                aff_reg = vision.get("affected_regions", "Whole Canopy")
+                aff_reg_kn = vision.get("affected_regions_kn", "ಸಂಪೂರ್ಣ ಗಿಡದ ಮೇಲ್ಭಾಗ")
+                entropy = vision.get("entropy", 0.0)
+                dbg = vision.get("debug_info", {})
+                q_agree = dbg.get("quadrant_agreement", "N/A")
+                next_en = vision.get("requested_next_action_en", "Please inspect the leaf underside for sporulation and check if lower leaves yellowed first.")
+                next_kn = vision.get("requested_next_action_kn", "ದಯವಿಟ್ಟು ರೋಗಪೀಡಿತ ಎಲೆಯ ಹಿಂಭಾಗದಲ್ಲಿ ಶಿಲೀಂಧ್ರ ಬೂಸ್ಟು ಇದೆಯೇ ಪರೀಕ್ಷಿಸಿ.")
+
+                preds = vision.get("predictions", [])
+                cand_lines_en = []
+                cand_lines_kn = []
+                for idx, p in enumerate(preds[:3], 1):
+                    cand_lines_en.append(f"  {idx}. **{p.get('label')}** ({p.get('confidence_percent')}%)")
+                    cand_lines_kn.append(f"  {idx}. **{p.get('label_kannada', p.get('label'))}** ({p.get('confidence_percent')}%)")
+                cand_str_en = "\n".join(cand_lines_en) if cand_lines_en else f"  1. **{top1_en}** ({conf:.1f}%)"
+                cand_str_kn = "\n".join(cand_lines_kn) if cand_lines_kn else f"  1. **{top1_kn}** ({conf:.1f}%)"
+
+                source_box_en = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="en")
+                source_box_kn = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="kn")
+
+                en = (
+                    f"### 🔬 Possible Diagnosis — Needs Confirmation: **{top1_en}** ({conf:.1f}% Confidence)\n\n"
+                    f"- **Status Assessment**: Valid crop foliage with localized symptom expression (Entropy: `{entropy:.3f}`, Regional Agreement: `{q_agree}`).\n"
+                    f"- **Affected Plant Region**: 📍 {aff_reg}\n\n"
+                    f"**Top-3 Candidate Diagnoses:**\n"
+                    f"{cand_str_en}\n\n"
+                    f"⚠️ **Safety Advisory**: Do not spray chemical fungicides or insecticides blindly until symptoms are physically verified.\n\n"
+                    f"👉 **Requested Next Photo or Field Information**:\n"
+                    f"{next_en}\n\n"
+                    f"**Immediate Low-Risk Management (ICAR/IIHR Protocol):**\n"
+                    f"- **Organic / Bio-control**: {treatments['organic_en']}\n"
+                    f"- **Cultural Care**: {treatments['cultural_en']}\n\n"
+                    f"{source_box_en}"
+                )
+                kn = (
+                    f"### 🔬 ಸಂಭಾವ್ಯ ರೋಗ ಪತ್ತೆ (ಖಚಿತತೆ ಅಗತ್ಯ): **{top1_kn}** (ವಿಶ್ವಾಸ: {conf:.1f}%)\n\n"
+                    f"- **ಸ್ಥಿತಿ ಪರಿಶೀಲನೆ**: ಕೃಷಿ ಬೆಳೆ ಗುರುತಿಸಲಾಗಿದೆ, ಗಿಡದ ಭಾಗಗಳಲ್ಲಿ ಲಕ್ಷಣ ವ್ಯತ್ಯಾಸ ಕಂಡುಬಂದಿದೆ (ಎಂಟ್ರೊಪಿ: `{entropy:.3f}`, ಪ್ರಾದೇಶಿಕ ಹೊಂದಾಣಿಕೆ: `{q_agree}`).\n"
+                    f"- **ಬಾಧಿತ ಭಾಗ**: 📍 {aff_reg_kn}\n\n"
+                    f"**ಟಾಪ್-3 ಸಂಭಾವ್ಯ ರೋಗಗಳು:**\n"
+                    f"{cand_str_kn}\n\n"
+                    f"⚠️ **ಸುರಕ್ಷತಾ ಎಚ್ಚರಿಕೆ**: ಲಕ್ಷಣಗಳನ್ನು ಸ್ಥಳದಲ್ಲಿ ಖಚಿತಪಡಿಸಿಕೊಳ್ಳುವವರೆಗೆ ಯಾವುದೇ ರಾಸಾಯನಿಕ ಕೀಟನಾಶಕವನ್ನು ಕುರುಡಾಗಿ ಸಿಂಪಡಿಸಬೇಡಿ.\n\n"
+                    f"👉 **ಮುಂದಿನ ಕ್ರಮ / ಅಗತ್ಯ ಮಾಹಿತಿ**:\n"
+                    f"{next_kn}\n\n"
+                    f"**ಸುರಕ್ಷಿತ ಆರಂಭಿಕ ನಿರ್ವಹಣೆ (ICAR/IIHR ಮಾರ್ಗಸೂಚಿ):**\n"
+                    f"- **ಸಾವಯವ / ಜೈವಿಕ ನಿಯಂತ್ರಣ**: {treatments['organic_kn']}\n"
+                    f"- **ಮುನ್ನೆಚ್ಚರಿಕೆ**: {treatments['cultural_kn']}\n\n"
+                    f"{source_box_kn}"
+                )
+                return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
+
+            # 5. Inconclusive / High Conflict
+            if status in ["uncertain_disease", "uncertain"]:
                 entropy = vision.get("entropy", 0.0)
                 conf = vision.get("top1_confidence", 0.0)
                 aff_reg = vision.get("affected_regions", "Multiple quadrants")
+                next_en = vision.get("requested_next_action_en", "Please upload a sharper, closer photograph of the infected leaf area.")
+                next_kn = vision.get("requested_next_action_kn", "ದಯವಿಟ್ಟು ರೋಗಬಾಧಿತ ಎಲೆಯ ಹತ್ತಿರದ ಸ್ಪಷ್ಟ ಫೋಟೋ ಕಳುಹಿಸಿ.")
+                source_box_en = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="en")
+                source_box_kn = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="kn")
+
                 en = (
                     f"⚠️ **Diagnostic Uncertainty Detected**\n\n"
-                    f"- **Top Signal**: {vision.get('top1_label')} ({conf:.1f}% confidence)\n"
-                    f"- **Predictive Entropy**: `{entropy:.3f}` (High uncertainty across quadrants)\n"
+                    f"- **Primary Visual Signal**: {vision.get('top1_label')} ({conf:.1f}% confidence)\n"
+                    f"- **Predictive Entropy**: `{entropy:.3f}` (Symptoms conflict across plant quadrants)\n"
                     f"- **Inspected Region**: {aff_reg}\n\n"
-                    f"> **Notice**: Conflicting symptoms observed across plant quadrants. Refusing blind chemical recommendation.\n"
-                    f"👉 **Action**: Please take a sharp, well-lit close-up photo of the transition between healthy and damaged leaves."
+                    f"⚠️ **Safety Advisory**: Do not spray chemical fungicides or insecticides blindly until symptoms are verified.\n\n"
+                    f"👉 **Requested Next Action**:\n{next_en}\n\n"
+                    f"{source_box_en}"
                 )
                 kn = (
                     f"⚠️ **ರೋಗ ಲಕ್ಷಣಗಳಲ್ಲಿ ಅನಿಶ್ಚಿತತೆ**\n\n"
                     f"- **ಪತ್ತೆಯಾದ ಲಕ್ಷಣ**: {vision.get('top1_label_kannada')} ({conf:.1f}% ಖಚಿತತೆ)\n"
                     f"- **ಎಂಟ್ರೊಪಿ ಅನಿಶ್ಚಿತತೆ**: `{entropy:.3f}`\n"
                     f"- **ಪರಿಶೀಲಿಸಿದ ಭಾಗ**: {vision.get('affected_regions_kn', aff_reg)}\n\n"
-                    f"> **ಸೂಚನೆ**: ಗಿಡದ ವಿವಿಧ ಭಾಗಗಳಲ್ಲಿ ಲಕ್ಷಣಗಳು ಅಸ್ಪಷ್ಟವಾಗಿರುವುದರಿಂದ ಖಚಿತ ರೋಗನಿರ್ಣಯ ಸಾಧ್ಯವಾಗಿಲ್ಲ.\n"
-                    f"👉 **ಸಲಹೆ**: ದಯವಿಟ್ಟು ರೋಗಬಾಧಿತ ಎಲೆಯ ಸ್ಪಷ್ಟ ಫೋಟೋವನ್ನು ಉತ್ತಮ ಬೆಳಕಿನಲ್ಲಿ ತೆಗೆದು ಕಳುಹಿಸಿ."
+                    f"⚠️ **ಸುರಕ್ಷತಾ ಎಚ್ಚರಿಕೆ**: ಲಕ್ಷಣಗಳು ಅಸ್ಪಷ್ಟವಾಗಿರುವುದರಿಂದ ರಾಸಾಯನಿಕ ಔಷಧಿಯನ್ನು ಕುರುಡಾಗಿ ಸಿಂಪಡಿಸಬೇಡಿ.\n\n"
+                    f"👉 **ಮುಂದಿನ ಕ್ರಮ**:\n{next_kn}\n\n"
+                    f"{source_box_kn}"
                 )
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-            # Confident Diagnosis
-            top1_en = vision.get("top1_label", "Unknown Condition")
+            # 6. Confident Diagnosis
+            top1_en = vision.get("raw_top1_label", vision.get("top1_label", "Unknown Condition"))
             top1_kn = vision.get("top1_label_kannada", top1_en)
             conf = vision.get("top1_confidence", 0.0)
             aff_reg = vision.get("affected_regions", "Whole Canopy")
             aff_reg_kn = vision.get("affected_regions_kn", "ಸಂಪೂರ್ಣ ಗಿಡದ ಮೇಲ್ಭಾಗ")
             is_healthy = vision.get("is_healthy", False)
+            source_box_en = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="en")
+            source_box_kn = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="kn")
 
             if is_healthy:
                 en = (
@@ -496,18 +637,20 @@ class AdvisorySynthesisService:
                     f"- **Status**: Healthy crop foliage ({conf:.1f}% confidence).\n"
                     f"- **Canopy Scope**: {aff_reg}.\n"
                     f"- **Assessment**: No active fungal lesions, viral mottling, or pest blights detected.\n"
-                    f"- **Maintenance**: Continue balanced irrigation and scheduled weeding. No chemical spray required."
+                    f"- **Maintenance**: Continue balanced irrigation and scheduled weeding. No chemical spray required.\n\n"
+                    f"{source_box_en}"
                 )
                 kn = (
                     f"### ✅ ಬೆಳೆ ಆರೋಗ್ಯ ತಪಾಸಣೆ: **{top1_kn}**\n\n"
                     f"- **ಸ್ಥಿತಿ**: ಆರೋಗ್ಯಕರ ಬೆಳೆ ({conf:.1f}% ಖಚಿತತೆ).\n"
                     f"- **ತಪಾಸಿತ ಭಾಗ**: {aff_reg_kn}.\n"
                     f"- **ವಿಶ್ಲೇಷಣೆ**: ಯಾವುದೇ ಶಿಲೀಂಧ್ರ ಕಲೆಗಳು ಅಥವಾ ಕೀಟಬಾಧೆ ಕಂಡುಬಂದಿಲ್ಲ.\n"
-                    f"- **ಸಲಹೆ**: ಸರಿಯಾದ ಸಮಯಕ್ಕೆ ನೀರು ಹಾಯಿಸಿ. ಯಾವುದೇ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯ ಅಗತ್ಯವಿಲ್ಲ."
+                    f"- **ಸಲಹೆ**: ಸರಿಯಾದ ಸಮಯಕ್ಕೆ ನೀರು ಹಾಯಿಸಿ. ಯಾವುದೇ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯ ಅಗತ್ಯವಿಲ್ಲ.\n\n"
+                    f"{source_box_kn}"
                 )
             else:
                 en = (
-                    f"### 🔬 Diagnosis: **{top1_en}** ({conf:.1f}% Confidence)\n\n"
+                    f"### 🔬 Confirmed Diagnosis: **{top1_en}** ({conf:.1f}% Confidence)\n\n"
                     f"- **Kannada**: {top1_kn}\n"
                     f"- **Affected Plant Region**: 📍 {aff_reg}\n\n"
                     f"**Immediate Management (ICAR/IIHR Protocol):**\n"
@@ -515,10 +658,10 @@ class AdvisorySynthesisService:
                     f"- **Chemical Treatment**: {treatments['chemical_en']}\n"
                     f"- **Cultural Action**: {treatments['cultural_en']}\n\n"
                     f"*Follow 7-day pre-harvest interval (PHI) for chemical sprays.*\n\n"
-                    f"📚 **Source Evidence**: {vision.get('source_evidence', 'ICAR-IIHR Agricultural Package of Practices.')}"
+                    f"{source_box_en}"
                 )
                 kn = (
-                    f"### 🔬 ರೋಗ ಪತ್ತೆ: **{top1_kn}** (ಖಚಿತತೆ: {conf:.1f}%)\n\n"
+                    f"### 🔬 ದೃಢೀಕೃತ ರೋಗ ಪತ್ತೆ: **{top1_kn}** (ಖಚಿತತೆ: {conf:.1f}%)\n\n"
                     f"- **ಇಂಗ್ಲಿಷ್ ಹೆಸರು**: {top1_en}\n"
                     f"- **ಬಾಧಿತ ಭಾಗ**: 📍 {aff_reg_kn}\n\n"
                     f"**ನಿರ್ವಹಣಾ ಕ್ರಮಗಳು (ICAR / IIHR ಶಿಫಾರಸು):**\n"
@@ -526,7 +669,7 @@ class AdvisorySynthesisService:
                     f"- **ರಾಸಾಯನಿಕ ಸಿಂಪಡಣೆ**: {treatments['chemical_kn']}\n"
                     f"- **ಮುನ್ನೆಚ್ಚರಿಕೆ**: {treatments['cultural_kn']}\n\n"
                     f"*ಔಷಧಿ ಸಿಂಪಡಿಸುವಾಗ ಮುಖಗವಸು ಧರಿಸಿ ಮತ್ತು ಕಾಯುವ ಅವಧಿಯನ್ನು ಪಾಲಿಸಿ.*\n\n"
-                    f"📚 **ಮೂಲ ಪ್ರಾಧಿಕಾರ**: {vision.get('source_evidence', 'ICAR-IIHR ಕೃಷಿ ಮಾರ್ಗಸೂಚಿಗಳು.')}"
+                    f"{source_box_kn}"
                 )
 
             # Append Nutrient Screening Hypothesis if applicable
@@ -587,6 +730,12 @@ class AdvisorySynthesisService:
                 f"- **ಮುನ್ನೆಚ್ಚರಿಕೆ ಕ್ರಮ**: {treatments['cultural_kn']}\n\n"
                 f"*ಔಷಧವನ್ನು ಮುಂಜಾನೆ ಅಥವಾ ಸಂಜೆಯ ವೇಳೆ ಸಿಂಪಡಿಸಿ. ಬಿಸಿಲಿನಲ್ಲಿ ಸಿಂಪಡಿಸಬೇಡಿ.*"
             )
+            source_box_en = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="en")
+            source_box_kn = self._format_source_evidence_markdown(vision.get("source_evidence"), lang="kn")
+            if source_box_en:
+                en += f"\n\n{source_box_en}"
+            if source_box_kn:
+                kn += f"\n\n{source_box_kn}"
             return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
         # Case 5: Contextual Agricultural Guidance (DELETED hardcoded menu completely)
