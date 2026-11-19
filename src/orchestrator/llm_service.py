@@ -141,12 +141,13 @@ class AdvisorySynthesisService:
             v_dino = vision.get("dinov2_plant_similarity", 0.0)
             v_reg = vision.get("affected_regions", "Whole Canopy")
             v_healthy = vision.get("is_healthy", False)
+            v_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
             vision_block = (
                 f"- Status: {v_status.upper()}\n"
                 f"- Top Condition: {v_label} (Kannada: {v_label_kn})\n"
                 f"- Confidence: {v_conf:.1f}%\n"
                 f"- Shannon Entropy H(p): {v_entropy:.3f} (Threshold: >1.80 is uncertain)\n"
-                f"- DINOv2 Plant Match: {v_dino:.3f} (Threshold: <0.35 is Non-Plant OOD)\n"
+                f"- DINOv2 Plant Match: {v_dino:.3f} (Threshold: <{v_thresh:.2f} is Non-Plant OOD)\n"
                 f"- Affected Plant Regions: {v_reg}\n"
                 f"- Healthy Crop Flag: {v_healthy}"
             )
@@ -410,16 +411,17 @@ class AdvisorySynthesisService:
             # OOD Non-Plant Refusal
             if status == "out_of_distribution":
                 dino_sim = vision.get("dinov2_plant_similarity", 0.0)
+                dino_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
                 en = (
                     f"⚠️ **Non-Plant Image Detected**\n\n"
-                    f"- **DINOv2 Agricultural Match**: `{dino_sim:.3f}` (Threshold: > 0.35)\n"
+                    f"- **DINOv2 Agricultural Match**: `{dino_sim:.3f}` (Threshold: > {dino_thresh:.2f})\n"
                     f"- **Status**: The uploaded photo does not contain a recognizable crop, plant canopy, or field foliage.\n"
                     f"- **Safety Notice**: Automatic disease diagnosis was safely withheld to prevent incorrect chemical application.\n\n"
                     f"👉 **Action**: Please upload a clear photo of an actual crop, leaf, stem, or plant canopy."
                 )
                 kn = (
                     f"⚠️ **ಕೃಷಿಯೇತರ ಚಿತ್ರ ಪತ್ತೆಯಾಗಿದೆ**\n\n"
-                    f"- **DINOv2 ಸಸ್ಯ ಹೋಲಿಕೆ**: `{dino_sim:.3f}` (ಅಗತ್ಯ: > 0.35)\n"
+                    f"- **DINOv2 ಸಸ್ಯ ಹೋಲಿಕೆ**: `{dino_sim:.3f}` (ಅಗತ್ಯ: > {dino_thresh:.2f})\n"
                     f"- **ಸ್ಥಿತಿ**: ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಕೃಷಿ ಬೆಳೆ, ಎಲೆ ಅಥವಾ ಕಾಂಡ ಕಂಡುಬಂದಿಲ್ಲ.\n"
                     f"- **ಸೂಚನೆ**: ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆಯನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ.\n\n"
                     f"👉 **ಸಲಹೆ**: ದಯವಿಟ್ಟು ಕೃಷಿ ಬೆಳೆ, ಗಿಡದ ಕಾಂಡ, ಅಥವಾ ಎಲೆಯ ಸ್ಪಷ್ಟ ಫೋಟೋ ಕಳುಹಿಸಿ."

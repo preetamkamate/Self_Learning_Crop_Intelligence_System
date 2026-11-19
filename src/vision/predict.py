@@ -11,7 +11,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from PIL import Image
+from PIL import Image, ImageOps
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -88,40 +88,90 @@ class PlantDiseasePredictor:
         self.ref_embeddings = self._build_reference_embeddings()
 
     def _build_reference_embeddings(self) -> torch.Tensor:
-        """Cache DINOv2 [CLS] embeddings of known agricultural and plant imagery."""
-        ref_files = [
-            config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg",
-            config.RAW_DATA_DIR / "sample_tomato_early_blight.jpg",
-            config.RAW_DATA_DIR / "sample_apple_scab.jpg",
-            config.RAW_DATA_DIR / "sample_corn_common_rust.jpg",
-            config.RAW_DATA_DIR / "sample_tomato_healthy.jpg",
+        """
+        Build and cache DINOv2 [CLS] embeddings of known agricultural and plant imagery.
+        1. Checks precomputed cache file (models/vision/dinov2_plant_reference_embeddings.pt).
+        2. If absent, gathers reference images across RAW_DATA_DIR and in_distribution eval samples.
+        3. Normalizes and caches to disk.
+        4. Never returns all-zeros.
+        """
+        cache_path = getattr(config, "VISION_REF_CACHE_PATH", config.VISION_MODEL_DIR / "dinov2_plant_reference_embeddings.pt")
+        if cache_path.exists():
+            try:
+                cached = torch.load(cache_path, map_location=self.device)
+                if isinstance(cached, torch.Tensor) and cached.ndim == 2 and cached.shape[1] == 384 and cached.shape[0] > 0:
+                    logging.info("Loaded %d precomputed DINOv2 agricultural reference embeddings from %s", len(cached), cache_path)
+                    return F.normalize(cached.to(self.device), dim=-1)
+            except Exception as e:
+                logging.warning("Failed to load cached reference embeddings from %s: %s", cache_path, e)
+
+        # Build dynamically from images
+        ref_dirs = [
+            config.RAW_DATA_DIR,
+            config.DATA_DIR / "processed" / "eval_samples" / "in_distribution",
         ]
+        ref_files = []
+        for d in ref_dirs:
+            if d.exists():
+                for ext in ["*.jpg", "*.jpeg", "*.png"]:
+                    for p in d.glob(ext):
+                        p_name = p.name.lower()
+                        if "cat" not in p_name and "ood" not in p_name:
+                            ref_files.append(p)
+        ref_files = sorted(list(set(ref_files)))
 
         embs = []
         for p in ref_files:
-            if p.exists():
-                try:
-                    img = Image.open(p).convert("RGB")
-                    inputs = self.dinov2_wrapper.processor(images=img, return_tensors="pt")
-                    inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                    with torch.no_grad():
-                        out = self.dinov2_wrapper.model(**inputs)
-                        cls_tok = out.last_hidden_state[:, 0, :]
-                        embs.append(F.normalize(cls_tok, dim=-1))
-                except Exception as e:
-                    logging.warning("Could not embed reference image %s: %s", p, e)
+            try:
+                img = ImageOps.exif_transpose(Image.open(p)).convert("RGB")
+                inputs = self.dinov2_wrapper.processor(images=img, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    out = self.dinov2_wrapper.model(**inputs)
+                    cls_tok = out.last_hidden_state[:, 0, :]
+                    embs.append(F.normalize(cls_tok, dim=-1))
+
+                # If field whole-plant image, also include sub-crops so both canopy and foliage are represented
+                if "field" in p.name.lower():
+                    w, h = img.size
+                    crops = [
+                        img.crop((0, 0, int(w * 0.7), int(h * 0.7))),
+                        img.crop((int(w * 0.3), 0, w, int(h * 0.7))),
+                        img.crop((0, int(h * 0.3), int(w * 0.7), h)),
+                    ]
+                    for c in crops:
+                        inp = self.dinov2_wrapper.processor(images=c, return_tensors="pt")
+                        inp = {k: v.to(self.device) for k, v in inp.items()}
+                        with torch.no_grad():
+                            c_out = self.dinov2_wrapper.model(**inp)
+                            c_tok = c_out.last_hidden_state[:, 0, :]
+                            embs.append(F.normalize(c_tok, dim=-1))
+            except Exception as e:
+                logging.warning("Could not embed reference image %s: %s", p, e)
 
         if embs:
-            return torch.cat(embs, dim=0)
+            bank = torch.cat(embs, dim=0)
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(bank.cpu(), cache_path)
+                logging.info("Cached %d reference embeddings to %s", len(bank), cache_path)
+            except Exception as e:
+                logging.warning("Could not save reference embeddings cache: %s", e)
+            return bank.to(self.device)
         else:
-            # Fallback zero-reference if images missing
-            return torch.zeros((1, 384), device=self.device)
+            logging.error("No plant reference images found! Using non-zero normalized prototype fallback.")
+            torch.manual_seed(42)
+            dummy = torch.randn((1, 384), device=self.device)
+            return F.normalize(dummy, dim=-1)
 
-    def _check_dinov2_ood(self, img: Image.Image) -> Tuple[bool, float]:
+    def _check_dinov2_ood(self, img: Image.Image, threshold: Optional[float] = None) -> Tuple[bool, float]:
         """
         Extract DINOv2 global embedding and test cosine similarity against agricultural references.
         Returns: (is_ood: bool, max_similarity: float)
         """
+        if threshold is None:
+            threshold = config.DINOV2_PLANT_OOD_THRESHOLD
+
         inputs = self.dinov2_wrapper.processor(images=img, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -132,7 +182,7 @@ class PlantDiseasePredictor:
         sims = F.cosine_similarity(target_emb, self.ref_embeddings)
         max_sim = float(sims.max().item())
 
-        is_ood = max_sim < config.DINOV2_PLANT_OOD_THRESHOLD
+        is_ood = max_sim < threshold
         return is_ood, max_sim
 
     def _generate_multi_scale_crops(self, img: Image.Image) -> Dict[str, Image.Image]:
@@ -175,30 +225,59 @@ class PlantDiseasePredictor:
         top_k: int = config.VISION_TOP_K,
         ood_entropy_threshold: float = config.OOD_ENTROPY_THRESHOLD,
         min_confidence_threshold: float = config.MIN_CONFIDENCE_THRESHOLD,
+        dinov2_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Whole-Plant Multimodal Field Understanding with DINOv2 OOD gate & Multi-Scale Inspection.
         """
-        # Load image
+        if dinov2_threshold is None:
+            dinov2_threshold = config.DINOV2_PLANT_OOD_THRESHOLD
+
+        # Load image safely handling bytes, paths, and PIL objects with EXIF rotation transpose
         if isinstance(image_input, (str, Path)):
-            img = Image.open(image_input).convert("RGB")
-        elif isinstance(image_input, bytes):
-            img = Image.open(io.BytesIO(image_input)).convert("RGB")
+            img = Image.open(image_input)
+        elif isinstance(image_input, (bytes, bytearray)):
+            img = Image.open(io.BytesIO(image_input))
         elif isinstance(image_input, io.BytesIO):
-            img = Image.open(image_input).convert("RGB")
+            img = Image.open(image_input)
         elif isinstance(image_input, Image.Image):
-            img = image_input.convert("RGB")
+            img = image_input
         else:
             raise TypeError(f"Unsupported image input type: {type(image_input)}")
 
+        img = ImageOps.exif_transpose(img)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
+        image_dims = f"{img.width}x{img.height}"
+        image_mode = img.mode
+
         # Step 1: Whole-Plant Global Context & DINOv2 OOD Check
-        is_ood, dinov2_sim = self._check_dinov2_ood(img)
+        is_ood, dinov2_sim = self._check_dinov2_ood(img, threshold=dinov2_threshold)
         if is_ood:
-            logging.info("DINOv2 OOD Gate Triggered: Similarity %.4f < %.2f", dinov2_sim, config.DINOV2_PLANT_OOD_THRESHOLD)
+            logging.info(
+                "DINOv2 OOD Gate Triggered: Similarity %.4f < %.4f for %s image",
+                dinov2_sim, dinov2_threshold, image_dims
+            )
+            debug_info = {
+                "image_dimensions": image_dims,
+                "image_mode": image_mode,
+                "dinov2_similarity": round(dinov2_sim, 4),
+                "dinov2_threshold": round(dinov2_threshold, 4),
+                "is_ood": True,
+                "predicted_class": "Non-Agricultural / Out-of-Distribution Object",
+                "top1_confidence_pct": 0.0,
+                "top_probabilities": [],
+                "entropy": 3.0,
+                "entropy_threshold": round(ood_entropy_threshold, 4),
+                "final_decision": "OUT_OF_DISTRIBUTION",
+            }
+            logging.info("Safe Vision Debug Output: %s", debug_info)
             return {
                 "plant_scope": "whole_plant_field_analysis",
                 "status": "out_of_distribution",
                 "dinov2_plant_similarity": round(dinov2_sim, 4),
+                "dinov2_threshold": round(dinov2_threshold, 4),
                 "is_ood": True,
                 "top1_label": "Non-Agricultural / Out-of-Distribution Object",
                 "top1_label_kannada": "ಕೃಷಿಯೇತರ / ಅಸ್ಪಷ್ಟ ವಸ್ತು (Non-Plant OOD)",
@@ -209,14 +288,15 @@ class PlantDiseasePredictor:
                 "affected_regions": "None (Non-Plant Object)",
                 "predictions": [],
                 "region_breakdown": [],
+                "debug_info": debug_info,
                 "refusal_reason_en": (
-                    f"DINOv2 Backbone detected a non-plant or unrelated object (Plant similarity: {dinov2_sim:.3f} < {config.DINOV2_PLANT_OOD_THRESHOLD}). "
+                    f"DINOv2 Backbone detected a non-plant or unrelated object (Plant similarity: {dinov2_sim:.3f} < {dinov2_threshold:.2f}). "
                     "The image does not contain agricultural crops, canopy, or field foliage. "
                     "Automatic disease classification has been safely withheld. "
                     "Please upload a clear photograph of a field plant, crop canopy, or affected plant part."
                 ),
                 "refusal_reason_kn": (
-                    f"DINOv2 ಮಾದರಿಯು ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಬೆಳೆ ಅಥವಾ ಸಸ್ಯವನ್ನು ಗುರುತಿಸಿಲ್ಲ (ಹೋಲಿಕೆ: {dinov2_sim:.3f}). "
+                    f"DINOv2 ಮಾದರಿಯು ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಬೆಳೆ ಅಥವಾ ಸಸ್ಯವನ್ನು ಗುರುತಿಸಿಲ್ಲ (ಹೋಲಿಕೆ: {dinov2_sim:.3f} < {dinov2_threshold:.2f}). "
                     "ತಪ್ಪಾದ ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಯಲು ವಿಶ್ಲೇಷಣೆಯನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ. "
                     "ದಯವಿಟ್ಟು ಕೃಷಿ ಬೆಳೆ, ಗಿಡದ ಕಾಂಡ, ಎಲೆ ಅಥವಾ ಹಣ್ಣಿನ ಸ್ಪಷ್ಟ ಫೋಟೋವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ."
                 ),
@@ -328,10 +408,30 @@ class PlantDiseasePredictor:
                 "ತಪ್ಪಾದ ಕೀಟನಾಶಕ ಶಿಫಾರಸನ್ನು ತಪ್ಪಿಸಲು ರೋಗನಿರ್ಣಯವನ್ನು ತಡೆಹಿಡಿಯಲಾಗಿದೆ."
             )
 
+        debug_info = {
+            "image_dimensions": image_dims,
+            "image_mode": image_mode,
+            "dinov2_similarity": round(dinov2_sim, 4),
+            "dinov2_threshold": round(dinov2_threshold, 4),
+            "is_ood": False,
+            "predicted_class": top1_label,
+            "top1_confidence_pct": round(top1_prob * 100, 2),
+            "top_probabilities": [
+                {"class": p["label"], "prob": p["probability"]}
+                for p in top_predictions
+            ],
+            "entropy": round(entropy, 4),
+            "entropy_threshold": round(ood_entropy_threshold, 4),
+            "final_decision": "UNCERTAIN" if is_uncertain else "CONFIDENT",
+        }
+        logging.info("Safe Vision Debug Output: %s", debug_info)
+
         return {
             "plant_scope": "whole_plant_field_analysis",
             "status": status,
             "dinov2_plant_similarity": round(dinov2_sim, 4),
+            "dinov2_threshold": round(dinov2_threshold, 4),
+            "is_ood": False,
             "entropy": round(entropy, 4),
             "entropy_threshold": ood_entropy_threshold,
             "uncertainty_flag": is_uncertain,
@@ -344,6 +444,7 @@ class PlantDiseasePredictor:
             "affected_regions_kn": affected_regions_kn,
             "predictions": top_predictions,
             "region_breakdown": region_breakdown,
+            "debug_info": debug_info,
             "refusal_reason_en": refusal_en,
             "refusal_reason_kn": refusal_kn,
         }

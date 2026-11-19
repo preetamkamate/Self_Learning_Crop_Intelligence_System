@@ -24,6 +24,7 @@ Thumbs.db
 *.safetensors
 *.pt
 !models/rag/faiss_index.bin
+!models/vision/dinov2_plant_reference_embeddings.pt
 
 # Feedback logs with runtime user data
 data/processed/feedback_queue.csv

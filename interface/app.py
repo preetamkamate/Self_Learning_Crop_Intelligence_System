@@ -13,7 +13,7 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -186,6 +186,17 @@ with st.sidebar:
     st.session_state.farmer_state.profile.soil_ph = ph_val
 
     st.markdown("---")
+    st.subheader("⚙️ Vision & OOD Tuning")
+    ood_threshold_val = st.slider(
+        "DINOv2 Plant OOD Threshold:",
+        min_value=0.05,
+        max_value=0.50,
+        value=float(config.DINOV2_PLANT_OOD_THRESHOLD),
+        step=0.01,
+        help="Cosine similarity below this threshold flags non-plant/unrelated objects. Configurable via DINOV2_PLANT_OOD_THRESHOLD env var.",
+    )
+
+    st.markdown("---")
     # Responsible Self-Learning Retraining Section
     st.subheader("🔄 Self-Learning Model Gate")
     stats = get_queue_statistics()
@@ -276,11 +287,12 @@ for idx, msg in enumerate(st.session_state.messages):
                         status = vision.get("status")
                         entropy = vision.get("entropy", 0.0)
                         dino_sim = vision.get("dinov2_plant_similarity", 1.0)
+                        dino_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
                         aff_reg = vision.get("affected_regions", "Whole Canopy")
 
                         if status == "out_of_distribution":
                             st.markdown(
-                                f'<span class="metric-badge badge-ood">🚫 NON-PLANT OOD (DINOv2={dino_sim:.3f})</span>',
+                                f'<span class="metric-badge badge-ood">🚫 NON-PLANT OOD (DINOv2={dino_sim:.3f} < {dino_thresh:.2f})</span>',
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"Refusal Gate Active: {vision.get('top1_label')}")
@@ -292,12 +304,25 @@ for idx, msg in enumerate(st.session_state.messages):
                             st.caption(f"Conflict across regions. Top1: {vision.get('top1_label')} ({vision.get('top1_confidence')}%)")
                         else:
                             st.markdown(
-                                f'<span class="metric-badge badge-confident">✅ CONFIDENT (DINOv2={dino_sim:.3f})</span>',
+                                f'<span class="metric-badge badge-confident">✅ CONFIDENT (DINOv2={dino_sim:.3f} >= {dino_thresh:.2f})</span>',
                                 unsafe_allow_html=True,
                             )
                             st.write(f"**Top Condition**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
+
+                        dbg = vision.get("debug_info")
+                        if dbg:
+                            with st.expander("🛠️ Safe Vision Debug Telemetry", expanded=False):
+                                st.caption(f"• **Dimensions**: `{dbg.get('image_dimensions')}` (Mode: `{dbg.get('image_mode')}`)")
+                                st.caption(f"• **DINOv2 Match**: `{dbg.get('dinov2_similarity')}` | Threshold: `{dbg.get('dinov2_threshold')}`")
+                                st.caption(f"• **OOD Decision**: `{'OOD (Rejected)' if dbg.get('is_ood') else 'In-Distribution (Accepted)'}`")
+                                st.caption(f"• **Predicted Class**: `{dbg.get('predicted_class')}` ({dbg.get('top1_confidence_pct')}%)")
+                                st.caption(f"• **Entropy**: `{dbg.get('entropy')}` | Threshold: `{dbg.get('entropy_threshold')}`")
+                                st.caption(f"• **Final Decision**: `{dbg.get('final_decision')}`")
+                                top_p = dbg.get("top_probabilities", [])
+                                if top_p:
+                                    st.caption("• **Top Probabilities**: " + ", ".join([f"{tp.get('class')}: {tp.get('prob')*100:.1f}%" for tp in top_p]))
 
                         breakdown = vision.get("region_breakdown", [])
                         if breakdown:
@@ -416,7 +441,9 @@ prompt_data = st.chat_input(
 # CHANGED: Extract both user text and attached files together in the same turn
 user_text = prompt_data.text.strip() if prompt_data and hasattr(prompt_data, "text") and prompt_data.text else (str(prompt_data).strip() if isinstance(prompt_data, str) else "")
 chat_files = prompt_data.files if prompt_data and hasattr(prompt_data, "files") and prompt_data.files else []
-chat_image_bytes = chat_files[0].read() if chat_files else None
+chat_image_bytes = None
+if chat_files:
+    chat_image_bytes = chat_files[0].getvalue() if hasattr(chat_files[0], "getvalue") else chat_files[0].read()
 
 # CHANGED: Check fallback attachment sources (Quick Test samples or expander file uploader)
 active_img_bytes = None
@@ -427,7 +454,7 @@ elif sample_image_trigger and sample_image_bytes:
     if not user_text and sample_image_label:
         user_text = sample_image_label
 elif uploaded_file is not None:
-    active_img_bytes = uploaded_file.getvalue()
+    active_img_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
 
 if not user_text and sample_prompt:
     user_text = sample_prompt
@@ -452,7 +479,13 @@ if should_run_turn:
 
     # Attach image thumbnail only if a NEW image is uploaded in this turn
     img_for_turn = active_img_bytes if is_new_image else None
-    pil_image = Image.open(io.BytesIO(img_for_turn)) if img_for_turn else None
+    if img_for_turn:
+        raw_pil = Image.open(io.BytesIO(img_for_turn))
+        pil_image = ImageOps.exif_transpose(raw_pil)
+        if pil_image.mode != "RGB":
+            pil_image = pil_image.convert("RGB")
+    else:
+        pil_image = None
 
     # CHANGED: Record User Message (both image thumbnail and text inside the same chat bubble)
     st.session_state.messages.append({
@@ -470,6 +503,7 @@ if should_run_turn:
             image_input=pil_image,
             is_new_image=is_new_image,  # CHANGED: Explicit boolean novelty flag
             image_hash=current_hash if is_new_image else None,
+            dinov2_threshold=ood_threshold_val,
             state=st.session_state.farmer_state,
         )
 
