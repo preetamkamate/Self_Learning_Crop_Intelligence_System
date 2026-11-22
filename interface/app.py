@@ -224,6 +224,13 @@ with st.sidebar:
             index=1,
         )
 
+    symptom_description = st.text_area(
+        "Optional Symptom Description:",
+        value="",
+        placeholder="e.g., lower leaves yellowing with concentric brown rings, wilting during mid-day",
+        help="Field-observed symptom details and lesion patterns.",
+    )
+
     st.markdown("---")
     st.subheader("⚙️ Vision & OOD Tuning")
     ood_threshold_val = st.slider(
@@ -324,19 +331,25 @@ for idx, msg in enumerate(st.session_state.messages):
                     st.markdown("**Whole-Plant Vision Diagnostics**")
                     if vision:
                         status = vision.get("status")
+                        outcome = vision.get("outcome", "Validated probable diagnosis" if status == "confident" else "Possible diagnosis—needs confirmation")
                         entropy = vision.get("entropy", 0.0)
                         norm_entropy = vision.get("norm_entropy", 0.0)
                         dino_sim = vision.get("dinov2_plant_similarity", 1.0)
                         dino_thresh = vision.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
                         aff_reg = vision.get("affected_regions", "Whole Canopy")
                         dbg = vision.get("debug_info", {})
+                        p_part = vision.get("plant_part", "leaf").replace("_", " ").title()
+                        crop_sp = vision.get("crop_species", "Unknown")
+
+                        st.markdown(f"**Standard Outcome**: `{outcome}`")
+                        st.markdown(f"**Detected Viewpoint**: `🌿 {p_part}` | **Crop**: `{crop_sp}`")
 
                         if status == "out_of_distribution":
                             st.markdown(
                                 f'<span class="metric-badge badge-ood">🚫 NON-PLANT OOD (DINOv2={dino_sim:.3f} < {dino_thresh:.2f})</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption(f"Refusal Gate Active: {vision.get('top1_label')}")
+                            st.caption(f"**Abstention Reason**: {vision.get('refusal_reason_en', 'Non-plant image detected.')}")
                         elif status == "insufficient_image_quality":
                             b_val = dbg.get("blur_metric", 0.0)
                             b_thresh = dbg.get("blur_threshold", 40.0)
@@ -344,10 +357,8 @@ for idx, msg in enumerate(st.session_state.messages):
                                 f'<span class="metric-badge badge-ood">🔍 BLURRED / LOW FOCUS (Sharpness={b_val:.1f} < {b_thresh:.1f})</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption("Foliar details are blurred or out of focus. Please hold steady in bright daylight and retake.")
+                            st.caption(f"**Abstention Reason**: {vision.get('refusal_reason_en', 'Image blurred.')}")
                         elif status == "unsupported_crop_part":
-                            crop_sp = vision.get("crop_species", "Plant")
-                            p_part = vision.get("plant_part", "part").replace("_", " ").title()
                             part_clean = vision.get("plant_part", "plant part").replace("_", " ")
                             st.markdown(
                                 f'<span class="metric-badge badge-module">🌿 VALID PLANT ({crop_sp} — {p_part})</span>'
@@ -355,14 +366,14 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.info(f"ℹ️ **Valid {part_clean} image detected. Diagnosis is not yet supported for this crop and image type.**")
-                            st.caption(f"**Abstention Reason**: No held-out validated pathology model is deployed for {crop_sp} ({p_part}). To prevent crop damage and off-target pesticide application, automated diagnosis is safely withheld.")
+                            st.caption(f"**Exact Abstention Reason**: {vision.get('refusal_reason_en', 'No held-out validated pathology model is deployed for this crop and viewpoint.')}")
                         elif status == "insufficient_evidence":
                             v_part = vision.get("plant_part", "plant part")
                             st.markdown(
                                 f'<span class="metric-badge badge-ood">⚠️ INSUFFICIENT VISUAL EVIDENCE ({v_part.upper()})</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption("Valid plant detected, but symptoms are ambiguous. Do not apply chemicals without physical check.")
+                            st.caption(f"**Exact Abstention Reason**: {vision.get('refusal_reason_en', 'Ambiguous visual symptoms.')}")
                         elif status == "probable_diagnosis_needs_confirmation":
                             part_raw = vision.get("plant_part", "leaf")
                             route_model = "MobileNetV2 Foliar Backbone" if part_raw == "leaf" else f"models/vision/{part_raw}_classifier.pt"
@@ -371,11 +382,15 @@ for idx, msg in enumerate(st.session_state.messages):
                                 f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{part_raw.replace('_', ' ').title()}`")
+                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{p_part}`")
                             st.write(f"**Top Candidate**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}` (Norm: `{norm_entropy:.3f}`)")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
                             st.caption("⚠️ Symptoms observed with quadrant variation. Physical confirmation advised before spraying.")
+                        elif status in ["needs_training_data", "whole_plant_not_trained"]:
+                            st.info("Whole-plant diagnosis is not trained yet")
+                        elif status == "whole_plant_unsupported":
+                            st.info("Whole plant detected, but this crop or disease is not supported yet.")
                         elif status in ["uncertain_disease", "uncertain"]:
                             st.markdown(
                                 f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS (H={entropy:.3f})</span>',
@@ -384,16 +399,22 @@ for idx, msg in enumerate(st.session_state.messages):
                             st.caption(f"Conflict across regions. Top1: {vision.get('top1_label')} ({vision.get('top1_confidence')}%)")
                         else:
                             part_raw = vision.get("plant_part", "leaf")
-                            route_model = "MobileNetV2 Foliar Backbone" if part_raw == "leaf" else f"models/vision/{part_raw}_classifier.pt"
-                            st.markdown(
-                                f'<span class="metric-badge badge-confident">✅ CONFIDENT (DINOv2={dino_sim:.3f} >= {dino_thresh:.2f})</span>'
-                                f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{part_raw.replace('_', ' ').title()}`")
-                            st.write(f"**Top Condition**: {vision.get('top1_label')}")
-                            st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
-                            st.write(f"**Affected Region**: 📍 *{aff_reg}*")
+                            if str(part_raw).lower() != "leaf":
+                                if str(part_raw).lower() == "whole_plant" or "whole plant" in p_part.lower():
+                                    st.info("Whole-plant diagnosis is not trained yet")
+                                else:
+                                    st.info("Diagnosis not supported yet")
+                            else:
+                                route_model = "MobileNetV2 Foliar Backbone"
+                                st.markdown(
+                                    f'<span class="metric-badge badge-confident">✅ VALIDATED PROBABLE DIAGNOSIS</span>'
+                                    f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{p_part}`")
+                                st.write(f"**Top Condition**: {vision.get('top1_label')}")
+                                st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
+                                st.write(f"**Affected Region**: 📍 *{aff_reg}*")
 
                         # Hierarchical Diagnosis Card
                         hierarchical = vision.get("hierarchical_diagnosis")
@@ -636,6 +657,8 @@ if should_run_turn:
 
     # CHANGED: Assign default diagnostic prompt internally if user submitted image with empty text
     internal_query = user_text if user_text else "Analyze this plant image and identify any health issues or diseases."
+    if symptom_description and symptom_description.strip():
+        internal_query += f" (Observed Symptoms: {symptom_description.strip()})"
     display_text = user_text  # Clean display in chat bubble (blank if image-only)
 
     # Attach image thumbnail only if a NEW image is uploaded in this turn

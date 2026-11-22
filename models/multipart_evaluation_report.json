@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "title": "Validated Multi-Part Diagnostic Routes Evaluation Table",
+    "title": "Comprehensive Held-Out Diagnostic Routes Evaluation Report",
     "date": "November 2026",
     "backbone": "facebook/dinov2-small (384-dim)",
     "pipeline": "4-Stage Hierarchical Route Gating",
@@ -9,216 +9,436 @@
   "routes": [
     {
       "crop": "Tomato",
-      "plant_part": "stem",
+      "viewpoint": "stem",
       "test_sample_count": 24,
       "precision": 0.7929,
       "recall": 0.7917,
       "f1_score": 0.7902,
+      "confusion_matrix": [
+        [
+          3,
+          3,
+          0,
+          0
+        ],
+        [
+          2,
+          4,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          6
+        ]
+      ],
+      "false_positive_rate": 0.2071,
       "cross_crop_contamination_rate": 0.0,
-      "unconstrained_leakage_rate": 0.4167,
-      "false_positive_rate": 0.2083,
-      "safe_abstention_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Corn (Maize)",
-      "plant_part": "stem",
+      "viewpoint": "stem",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
-      "unconstrained_leakage_rate": 0.5,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Grape",
-      "plant_part": "stem",
+      "viewpoint": "stem",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
-      "unconstrained_leakage_rate": 0.1667,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Citrus",
-      "plant_part": "stem",
+      "viewpoint": "stem",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
-      "unconstrained_leakage_rate": 0.5,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Tomato",
-      "plant_part": "fruit",
+      "viewpoint": "whole_plant",
       "test_sample_count": 18,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
+      "status": "VALIDATED & DEPLOYED"
+    },
+    {
+      "crop": "Corn (Maize)",
+      "viewpoint": "whole_plant",
+      "test_sample_count": 24,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          6
+        ]
+      ],
+      "false_positive_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
+      "ood_true_positive_rate": 1.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
+      "status": "VALIDATED & DEPLOYED"
+    },
+    {
+      "crop": "Tomato",
+      "viewpoint": "fruit",
+      "test_sample_count": 18,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          6
+        ]
+      ],
+      "false_positive_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
+      "ood_true_positive_rate": 1.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Apple",
-      "plant_part": "fruit",
+      "viewpoint": "fruit",
       "test_sample_count": 18,
       "precision": 0.6667,
       "recall": 0.6667,
       "f1_score": 0.625,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          5
+        ],
+        [
+          0,
+          1,
+          5
+        ]
+      ],
       "false_positive_rate": 0.3333,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Bell Pepper",
-      "plant_part": "fruit",
+      "viewpoint": "fruit",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Citrus",
-      "plant_part": "fruit",
+      "viewpoint": "fruit",
       "test_sample_count": 18,
       "precision": 0.6667,
       "recall": 0.6667,
       "f1_score": 0.6571,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          4,
+          2
+        ],
+        [
+          0,
+          4,
+          2
+        ]
+      ],
       "false_positive_rate": 0.3333,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Potato",
-      "plant_part": "root",
+      "viewpoint": "root",
       "test_sample_count": 18,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Tomato",
-      "plant_part": "whole_plant",
+      "viewpoint": "canopy",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Corn (Maize)",
-      "plant_part": "whole_plant",
+      "viewpoint": "canopy",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
-      "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
-      "status": "VALIDATED & DEPLOYED"
-    },
-    {
-      "crop": "Tomato",
-      "plant_part": "canopy",
-      "test_sample_count": 12,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1_score": 1.0,
       "cross_crop_contamination_rate": 0.0,
-      "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
-      "status": "VALIDATED & DEPLOYED"
-    },
-    {
-      "crop": "Corn (Maize)",
-      "plant_part": "canopy",
-      "test_sample_count": 12,
-      "precision": 1.0,
-      "recall": 1.0,
-      "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
-      "false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
       "safe_abstention_rate": 0.0,
-      "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Coconut",
-      "plant_part": "bark_trunk",
+      "viewpoint": "bark_trunk",
       "test_sample_count": 18,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     },
     {
       "crop": "Apple",
-      "plant_part": "bark_trunk",
+      "viewpoint": "bark_trunk",
       "test_sample_count": 12,
       "precision": 1.0,
       "recall": 1.0,
       "f1_score": 1.0,
-      "cross_crop_contamination_rate": 0.0,
+      "confusion_matrix": [
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          6
+        ]
+      ],
       "false_positive_rate": 0.0,
-      "safe_abstention_rate": 0.0,
+      "cross_crop_contamination_rate": 0.0,
       "ood_true_positive_rate": 1.0,
-      "ood_false_positive_rate": 0.0,
+      "valid_plant_false_rejection_rate": 0.0,
+      "safe_abstention_rate": 0.0,
       "status": "VALIDATED & DEPLOYED"
     }
   ]

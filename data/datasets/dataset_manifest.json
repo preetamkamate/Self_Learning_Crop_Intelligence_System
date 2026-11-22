@@ -85,15 +85,20 @@
       "classes": [
         "Tomato Fusarium Wilt",
         "Healthy Tomato Whole Plant",
+        "Tomato Heat and Drought Stress",
         "Corn Stunt Disease",
-        "Healthy Corn Whole Plant"
+        "Healthy Corn Whole Plant",
+        "Corn Fall Armyworm Damage",
+        "Corn Nitrogen Deficiency Chlorosis",
+        "Unknown Plant Foliage",
+        "Non-Plant Background Object"
       ],
       "splits": {
-        "train": 100,
-        "val": 24,
-        "test": 24
+        "train": 225,
+        "val": 54,
+        "test": 54
       },
-      "total_samples": 148,
+      "total_samples": 333,
       "local_dir": "data/datasets/whole_plant"
     },
     "canopy": {

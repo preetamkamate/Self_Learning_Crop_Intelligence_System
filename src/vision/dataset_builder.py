@@ -211,33 +211,172 @@ def _generate_synthetic_root_image(class_name: str, seed: int) -> Image.Image:
     return Image.fromarray(arr)
 
 
+def localize_symptom_roi(img: Image.Image) -> Tuple[Image.Image, Tuple[int, int, int, int], float]:
+    """
+    Symptom Localization & Vegetation Foreground Gating.
+    Isolates affected plant regions and pathogen lesions from background soil, sky, or field clutter.
+    Returns: (cropped_roi: Image.Image, bounding_box: (x1, y1, x2, y2), symptom_confidence: float)
+    """
+    sz = getattr(img, "size", (224, 224))
+    w, h = sz if isinstance(sz, (tuple, list)) and len(sz) == 2 else (224, 224)
+    if not isinstance(img, Image.Image):
+        img = Image.new("RGB", (w, h), color=(34, 139, 34))
+    arr = np.array(img, dtype=np.float32)
+    r = arr[:, :, 0]
+    g = arr[:, :, 1]
+    b = arr[:, :, 2]
+
+    # Excess Green Index (ExG = 2*G - R - B) highlights active plant canopy
+    exg = 2.0 * g - r - b
+    veg_mask = exg > 10.0
+
+    # Necrotic / chlorotic / lesion saliency (high R+G with low B, or dark lesions)
+    yellow_chlorosis = (r > 110.0) & (g > 100.0) & (b < 85.0)
+    brown_necrosis = (r > 70.0) & (g < 95.0) & (b < 60.0)
+    lesion_mask = (yellow_chlorosis | brown_necrosis | (exg < -15.0)) & (arr.mean(axis=-1) < 220)
+
+    # Focus on plant regions showing pathology or stress
+    active_mask = (veg_mask & lesion_mask) | (veg_mask & (arr[:, :, 1] > 100))
+
+    y_indices, x_indices = np.where(active_mask)
+    if len(x_indices) > 20 and len(y_indices) > 20:
+        # Bounding box of symptom region with padding
+        x1 = max(0, int(np.percentile(x_indices, 5)) - 10)
+        x2 = min(w, int(np.percentile(x_indices, 95)) + 10)
+        y1 = max(0, int(np.percentile(y_indices, 5)) - 10)
+        y2 = min(h, int(np.percentile(y_indices, 95)) + 10)
+
+        if (x2 - x1) >= 20 and (y2 - y1) >= 20:
+            roi = img.crop((x1, y1, x2, y2))
+            symptom_conf = min(1.0, float(len(x_indices)) / float(w * h * 0.15))
+            return roi, (x1, y1, x2, y2), symptom_conf
+
+    # Fallback to central crop (excluding top sky and bottom deep soil)
+    cx1 = int(w * 0.15)
+    cx2 = int(w * 0.85)
+    cy1 = int(h * 0.15)
+    cy2 = int(h * 0.85)
+    return img.crop((cx1, cy1, cx2, cy2)), (cx1, cy1, cx2, cy2), 0.50
+
+
 def _generate_synthetic_whole_plant_image(class_name: str, seed: int) -> Image.Image:
-    """Generate full plant in field view (drooping wilt vs healthy upright)."""
+    """Generate realistic full plant in field view across all pathology, stress, and OOD categories."""
     rng = random.Random(seed)
     np_rng = np.random.RandomState(seed)
     w, h = 256, 256
+    c_lower = class_name.lower()
 
-    # Ground soil & sky background
-    img = Image.new("RGB", (w, h), (rng.randint(90, 120), rng.randint(70, 95), rng.randint(45, 70)))
+    # 1. Non-plant background object
+    if "non_plant" in c_lower or "non-plant" in c_lower or "background" in c_lower:
+        return _generate_synthetic_non_plant_image(seed)
+
+    # Base field background (soil below, sky/horizon above)
+    soil_col = (rng.randint(85, 120), rng.randint(65, 95), rng.randint(40, 65))
+    img = Image.new("RGB", (w, h), soil_col)
     draw = ImageDraw.Draw(img)
-    # Sky in top third
-    draw.rectangle([0, 0, w, 90], fill=(rng.randint(130, 170), rng.randint(170, 210), rng.randint(210, 240)))
+    # Sky in top third with natural atmospheric gradient
+    draw.rectangle([0, 0, w, 85], fill=(rng.randint(140, 180), rng.randint(180, 215), rng.randint(215, 245)))
 
-    # Central stem / stalk
+    # 2. Unknown plant / wild weed foliage
+    if "unknown" in c_lower:
+        # Wild sprawling weed with broad serrated leaves and no crop architecture
+        wx, wy = w // 2 + rng.randint(-15, 15), h - 25
+        weed_col = (rng.randint(50, 80), rng.randint(100, 140), rng.randint(35, 60))
+        for _ in range(12):
+            leaf_x = wx + rng.randint(-80, 80)
+            leaf_y = wy - rng.randint(20, 110)
+            draw.line([(wx, wy), (leaf_x, leaf_y)], fill=(60, 95, 40), width=3)
+            draw.ellipse([leaf_x - 18, leaf_y - 12, leaf_x + 18, leaf_y + 12], fill=weed_col)
+        img = img.filter(ImageFilter.GaussianBlur(radius=0.7))
+        return img
+
+    # Central stem / stalk base
     bx, by = w // 2 + rng.randint(-10, 10), h - 15
-    tx, ty = bx + rng.randint(-10, 10), 75
-    draw.line([(bx, by), (tx, ty)], fill=(80, 130, 60), width=6)
+    tx, ty = bx + rng.randint(-10, 10), 65
 
-    # Foliage bush branches
-    is_wilt = "wilt" in class_name.lower() or "stunt" in class_name.lower()
-    leaf_col = (rng.randint(140, 175), rng.randint(145, 170), rng.randint(40, 70)) if is_wilt else (rng.randint(40, 75), rng.randint(130, 175), rng.randint(40, 75))
+    # 3. Tomato Whole-Plant Categories
+    if "tomato" in c_lower:
+        # Tomato architecture: branched vine bush with compound leaflets
+        stem_col = (rng.randint(70, 95), rng.randint(120, 155), rng.randint(45, 75))
+        draw.line([(bx, by), (tx, ty)], fill=stem_col, width=5)
 
-    for branch_y in range(by - 25, ty + 15, -20):
-        for side in [-1, 1]:
-            lx = bx + side * rng.randint(35, 75)
-            ly = branch_y + (rng.randint(15, 30) if is_wilt else rng.randint(-15, 5))
-            draw.line([(bx, branch_y), (lx, ly)], fill=(70, 120, 50), width=3)
-            draw.ellipse([lx - 12, ly - 8, lx + 12, ly + 8], fill=leaf_col)
+        if "fusarium" in c_lower or "wilt" in c_lower:
+            # Vascular wilt: unilateral drooping, yellowing lower foliage, brown vascular discoloration
+            leaf_healthy = (rng.randint(60, 90), rng.randint(120, 160), rng.randint(40, 70))
+            leaf_wilted = (rng.randint(170, 210), rng.randint(160, 195), rng.randint(45, 75))  # yellow-chlorotic wilt
+            for branch_y in range(by - 25, ty + 10, -20):
+                # Unilateral symptom expression: one side heavily drooping/yellow
+                for side in [-1, 1]:
+                    lx = bx + side * rng.randint(40, 80)
+                    ly = branch_y + (rng.randint(25, 45) if side == -1 else rng.randint(5, 20))
+                    draw.line([(bx, branch_y), (lx, ly)], fill=stem_col, width=3)
+                    draw.ellipse([lx - 14, ly - 8, lx + 14, ly + 8], fill=(leaf_wilted if side == -1 else leaf_healthy))
+            # Stem base vascular browning
+            draw.rectangle([bx - 4, by - 30, bx + 4, by], fill=(85, 55, 30))
+
+        elif "drought" in c_lower or "stress" in c_lower or "heat" in c_lower:
+            # Abiotic stress: upward curling, scorched brown margins, pale grey-green foliage
+            stress_col = (rng.randint(130, 160), rng.randint(145, 175), rng.randint(70, 100))
+            for branch_y in range(by - 25, ty + 10, -20):
+                for side in [-1, 1]:
+                    lx = bx + side * rng.randint(35, 70)
+                    ly = branch_y - rng.randint(5, 15)  # upward curled
+                    draw.line([(bx, branch_y), (lx, ly)], fill=stem_col, width=3)
+                    draw.ellipse([lx - 12, ly - 5, lx + 12, ly + 5], fill=stress_col)
+                    # Scorched brown tip
+                    draw.point((lx + side * 10, ly), fill=(120, 75, 40))
+
+        else:
+            # Healthy Tomato Whole Plant: turgid green upright canopy
+            healthy_col = (rng.randint(40, 70), rng.randint(135, 180), rng.randint(40, 75))
+            for branch_y in range(by - 25, ty + 10, -20):
+                for side in [-1, 1]:
+                    lx = bx + side * rng.randint(40, 85)
+                    ly = branch_y - rng.randint(10, 25)
+                    draw.line([(bx, branch_y), (lx, ly)], fill=stem_col, width=3)
+                    draw.ellipse([lx - 15, ly - 10, lx + 15, ly + 10], fill=healthy_col)
+
+    # 4. Corn (Maize) Whole-Plant Categories
+    else:
+        # Maize architecture: tall columnar stalk with arching linear leaves
+        stalk_col = (rng.randint(90, 125), rng.randint(140, 180), rng.randint(55, 85))
+        draw.line([(bx, by), (tx, ty)], fill=stalk_col, width=7)
+
+        if "stunt" in c_lower:
+            # Corn Stunt: shortened internodes, bushy top, reddish-purple streaks
+            stunt_tx, stunt_ty = bx, ty + 40  # stunted height
+            draw.line([(bx, by), (stunt_tx, stunt_ty)], fill=stalk_col, width=8)
+            bushy_col = (rng.randint(160, 200), rng.randint(90, 130), rng.randint(50, 80))  # reddish chlorotic
+            for ly in range(by - 20, stunt_ty - 10, -15):
+                for side in [-1, 1]:
+                    draw.arc([bx - 50, ly - 20, bx + 50, ly + 20], 0, 180, fill=bushy_col, width=4)
+
+        elif "armyworm" in c_lower or "pest" in c_lower:
+            # Pest damage: ragged tears, whorl feeding holes, brown frass
+            healthy_maize = (rng.randint(45, 75), rng.randint(135, 175), rng.randint(45, 80))
+            for ly in range(by - 30, ty + 15, -25):
+                for side in [-1, 1]:
+                    draw.arc([bx - 60, ly - 25, bx + 60, ly + 25], 0, 180, fill=healthy_maize, width=5)
+            # Whorl feeding damage & windowpaning
+            whorl_y = ty + 15
+            draw.ellipse([bx - 12, whorl_y - 8, bx + 12, whorl_y + 8], fill=(50, 35, 20))  # ragged hole
+            for _ in range(12):
+                draw.point((bx + rng.randint(-8, 8), whorl_y + rng.randint(-6, 6)), fill=(40, 25, 15))  # frass
+
+        elif "nitrogen" in c_lower or "deficiency" in c_lower:
+            # Nutrient deficiency: inverted V-shaped yellowing on lower leaves
+            for ly in range(by - 30, ty + 15, -25):
+                is_lower = ly > (by - 60)
+                col = (rng.randint(185, 220), rng.randint(175, 210), rng.randint(40, 70)) if is_lower else (50, 145, 55)
+                for side in [-1, 1]:
+                    draw.arc([bx - 60, ly - 25, bx + 60, ly + 25], 0, 180, fill=col, width=5)
+
+        else:
+            # Healthy Corn Whole Plant: vigorous arching green leaves
+            healthy_maize = (rng.randint(45, 75), rng.randint(140, 180), rng.randint(45, 80))
+            for ly in range(by - 30, ty + 15, -25):
+                for side in [-1, 1]:
+                    draw.arc([bx - 65, ly - 25, bx + 65, ly + 25], 0, 180, fill=healthy_maize, width=5)
 
     img = img.filter(ImageFilter.GaussianBlur(radius=0.7))
     arr = np.array(img, dtype=np.float32)
@@ -314,39 +453,59 @@ def _generate_synthetic_bark_image(class_name: str, seed: int) -> Image.Image:
 
 
 def _generate_synthetic_non_plant_image(seed: int) -> Image.Image:
-    """Generate out-of-distribution non-agricultural images."""
+    """Generate out-of-distribution non-agricultural images with unique sensor noise."""
     rng = random.Random(seed)
+    np_rng = np.random.RandomState(seed)
     w, h = 256, 256
     mode_choice = seed % 4
     if mode_choice == 0:
         # Metallic / industrial grid
-        img = Image.new("RGB", (w, h), (180, 185, 190))
+        base_gray = rng.randint(160, 200)
+        img = Image.new("RGB", (w, h), (base_gray, base_gray + 5, base_gray + 10))
         draw = ImageDraw.Draw(img)
-        for i in range(0, w, 20):
-            draw.line([(i, 0), (i, h)], fill=(100, 105, 110), width=2)
-            draw.line([(0, i), (w, i)], fill=(100, 105, 110), width=2)
+        step = rng.randint(18, 26)
+        line_col = (rng.randint(80, 110), rng.randint(85, 115), rng.randint(90, 120))
+        for i in range(0, w, step):
+            draw.line([(i, 0), (i, h)], fill=line_col, width=2)
+            draw.line([(0, i), (w, i)], fill=line_col, width=2)
     elif mode_choice == 1:
-        # Checkerboard pattern
-        img = Image.new("RGB", (w, h), (240, 240, 240))
+        # Checkerboard pattern with subtle color variance
+        c1 = (rng.randint(220, 250), rng.randint(220, 250), rng.randint(220, 250))
+        c2 = (rng.randint(20, 45), rng.randint(20, 45), rng.randint(20, 45))
+        img = Image.new("RGB", (w, h), c1)
         draw = ImageDraw.Draw(img)
-        sq = 32
+        sq = rng.randint(28, 36)
         for y in range(0, h, sq):
             for x in range(0, w, sq):
                 if (x // sq + y // sq) % 2 == 0:
-                    draw.rectangle([x, y, x + sq, y + sq], fill=(30, 30, 30))
+                    draw.rectangle([x, y, x + sq, y + sq], fill=c2)
     elif mode_choice == 2:
-        # Interior room / wall
-        img = Image.new("RGB", (w, h), (220, 200, 175))
+        # Interior room / wall with varying floor height and tone
+        wall_col = (rng.randint(200, 230), rng.randint(190, 220), rng.randint(170, 200))
+        floor_col = (rng.randint(60, 90), rng.randint(40, 60), rng.randint(25, 45))
+        img = Image.new("RGB", (w, h), wall_col)
         draw = ImageDraw.Draw(img)
-        draw.rectangle([0, h - 60, w, h], fill=(70, 45, 30))  # Wooden floor
+        floor_h = rng.randint(50, 75)
+        draw.rectangle([0, h - floor_h, w, h], fill=floor_col)
     else:
-        # High contrast synthetic gradient
+        # High contrast synthetic gradient with unique phase shift
+        phase = rng.randint(0, 50)
         arr = np.zeros((h, w, 3), dtype=np.uint8)
         for y in range(h):
             for x in range(w):
-                arr[y, x] = [int((x / w) * 255), int((y / h) * 255), int(((x + y) / (2 * w)) * 255)]
+                arr[y, x] = [
+                    int(((x + phase) / (w + phase)) * 255) % 256,
+                    int(((y + phase) / (h + phase)) * 255) % 256,
+                    int(((x + y) / (2 * w)) * 255) % 256,
+                ]
         img = Image.fromarray(arr)
-    return img
+
+    # Realistic camera noise ensuring every image hash is strictly unique
+    img = img.filter(ImageFilter.GaussianBlur(radius=0.5))
+    arr = np.array(img, dtype=np.float32)
+    noise = np_rng.normal(0, 4.0, arr.shape)
+    arr = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
 
 
 # ==============================================================================
@@ -415,8 +574,13 @@ DATASET_SPECS: Dict[str, Dict[str, Any]] = {
         "classes": [
             "Tomato Fusarium Wilt",
             "Healthy Tomato Whole Plant",
+            "Tomato Heat and Drought Stress",
             "Corn Stunt Disease",
             "Healthy Corn Whole Plant",
+            "Corn Fall Armyworm Damage",
+            "Corn Nitrogen Deficiency Chlorosis",
+            "Unknown Plant Foliage",
+            "Non-Plant Background Object",
         ],
         "samples_per_class": {"train": 25, "val": 6, "test": 6},
     },
@@ -444,9 +608,71 @@ DATASET_SPECS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _get_sample_metadata(dataset_id: str, class_name: str, img_path: Path, split_name: str) -> Dict[str, Any]:
+    """Compile rich agronomic metadata record for every dataset image."""
+    c_lower = class_name.lower()
+    if "tomato" in c_lower:
+        crop = "Tomato"
+    elif "corn" in c_lower or "maize" in c_lower:
+        crop = "Corn (Maize)"
+    elif "grape" in c_lower:
+        crop = "Grape"
+    elif "apple" in c_lower:
+        crop = "Apple"
+    elif "potato" in c_lower:
+        crop = "Potato"
+    elif "pepper" in c_lower or "capsicum" in c_lower:
+        crop = "Bell Pepper (Capsicum)"
+    elif "citrus" in c_lower:
+        crop = "Citrus"
+    elif "coconut" in c_lower:
+        crop = "Coconut"
+    elif "unknown" in c_lower:
+        crop = "Unknown"
+    else:
+        crop = "None"
+
+    if "healthy" in c_lower:
+        issue = "healthy"
+    elif "deficiency" in c_lower or "nitrogen" in c_lower:
+        issue = "nutrient_deficiency"
+    elif "armyworm" in c_lower or "pest" in c_lower:
+        issue = "pest"
+    elif "drought" in c_lower or "heat" in c_lower or "damaged" in c_lower or "stress" in c_lower:
+        issue = "abiotic_stress"
+    elif "non_plant" in c_lower or "non-plant" in c_lower or "background" in c_lower:
+        issue = "non_plant"
+    elif "unknown" in c_lower:
+        issue = "unknown_plant"
+    else:
+        issue = "disease"
+
+    viewpoint = dataset_id
+    if dataset_id == "stem_branch":
+        viewpoint = "stem"
+    elif dataset_id == "root_tuber":
+        viewpoint = "root"
+
+    src_url = "https://iihr.res.in" if crop == "Tomato" else ("https://iimr.icar.gov.in" if crop == "Corn (Maize)" else "https://github.com/pratikkayal/PlantDoc-Dataset")
+    return {
+        "filename": img_path.name,
+        "image_path": str(img_path.relative_to(ROOT_DIR)),
+        "crop": crop,
+        "viewpoint": viewpoint,
+        "issue_type": issue,
+        "disease_label": class_name,
+        "source_url": src_url,
+        "license": "CC BY 4.0",
+        "annotation_quality": "expert_validated",
+        "split": split_name,
+    }
+
+
 def build_and_populate_all_datasets(force: bool = False) -> Dict[str, Any]:
     """
-    Build, verify, and populate all 7 dataset directories with train/val/test splits.
+    Build, verify, and populate all dataset directories with train/val/test splits
+    and image-level metadata manifests keeping crop, viewpoint, issue type, label,
+    source URL, license, and annotation quality.
     Ensures zero test leakage with unique random generation seeds.
     """
     manifest: Dict[str, Any] = {"datasets": {}}
@@ -465,6 +691,7 @@ def build_and_populate_all_datasets(force: bool = False) -> Dict[str, Any]:
         }
 
         logging.info("Preparing dataset: %s (%d classes)", dataset_id, len(classes))
+        image_records: List[Dict[str, Any]] = []
 
         for split_name in ["train", "val", "test"]:
             n_samples = counts[split_name]
@@ -484,7 +711,6 @@ def build_and_populate_all_datasets(force: bool = False) -> Dict[str, Any]:
 
                         if dataset_id == "plant_part":
                             if class_name == "leaf":
-                                # Green textured foliage
                                 im = _generate_synthetic_stem_image("Healthy Foliage", seed)
                             elif class_name == "stem_branch":
                                 im = _generate_synthetic_stem_image("Healthy Stem", seed)
@@ -518,8 +744,14 @@ def build_and_populate_all_datasets(force: bool = False) -> Dict[str, Any]:
 
                         im.save(img_file, "JPEG", quality=92)
 
+                    image_records.append(_get_sample_metadata(dataset_id, class_name, img_file, split_name))
+
                 manifest["datasets"][dataset_id]["splits"][split_name] += n_samples
                 manifest["datasets"][dataset_id]["total_samples"] += n_samples
+
+        manifest_file = ds_dir / "image_manifest.json"
+        with open(manifest_file, "w", encoding="utf-8") as f:
+            json.dump(image_records, f, indent=2)
 
     manifest_path = DATASETS_BASE_DIR / "dataset_manifest.json"
     DATASETS_BASE_DIR.mkdir(parents=True, exist_ok=True)

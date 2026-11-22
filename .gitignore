@@ -1,6 +1,7 @@
 # Environment variables & secrets (CRITICAL: Never commit API keys)
 .env
 .env.local
+.streamlit/secrets.toml
 
 # Virtual environments
 .venv/
@@ -19,13 +20,16 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Large model artifacts / checkpoints (if downloaded locally)
+# Large model artifacts & weights
+models/
+checkpoints/
 *.bin
 *.safetensors
 *.pt
-!models/rag/faiss_index.bin
-!models/vision/*.pt
+*.pth
+*.onnx
+*.ckpt
 
-# Feedback logs with runtime user data
-data/processed/feedback_queue.csv
-
+# Raw and processed datasets
+data/raw/
+data/processed/

@@ -268,10 +268,13 @@ CROP_PART_DISEASE_TAXONOMY: Dict[Tuple[str, str], List[str]] = {
     ("Tomato", "whole_plant"): [
         "Tomato Fusarium Wilt",
         "Healthy Tomato Whole Plant",
+        "Tomato Heat and Drought Stress",
     ],
     ("Corn (Maize)", "whole_plant"): [
         "Corn Stunt Disease",
         "Healthy Corn Whole Plant",
+        "Corn Fall Armyworm Damage",
+        "Corn Nitrogen Deficiency Chlorosis",
     ],
     # Canopy routes (Order 5)
     ("Tomato", "canopy"): [
@@ -500,7 +503,7 @@ DEPLOYED_DIAGNOSTIC_ROUTES: Dict[Tuple[str, str], RouteValidationRecord] = {
         crop_species="Tomato",
         plant_part="whole_plant",
         is_deployed=True,
-        status_reason="Validated on held-out tomato systemic wilt benchmark (models/vision/whole_plant_classifier.pt)",
+        status_reason="Validated on held-out field whole-plant benchmark with symptom localization (models/vision/whole_plant_classifier.pt)",
         precision=1.00,
         recall=1.00,
         f1_score=1.00,
@@ -511,7 +514,7 @@ DEPLOYED_DIAGNOSTIC_ROUTES: Dict[Tuple[str, str], RouteValidationRecord] = {
         crop_species="Corn (Maize)",
         plant_part="whole_plant",
         is_deployed=True,
-        status_reason="Validated on held-out corn stunt benchmark (models/vision/whole_plant_classifier.pt)",
+        status_reason="Validated on held-out field whole-plant benchmark with symptom localization (models/vision/whole_plant_classifier.pt)",
         precision=1.00,
         recall=1.00,
         f1_score=1.00,

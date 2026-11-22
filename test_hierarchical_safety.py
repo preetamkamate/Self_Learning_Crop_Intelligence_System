@@ -117,21 +117,20 @@ def test_zero_cross_crop_contamination():
     assert res_health["is_healthy"] is True or "healthy" in res_health["top1_label"].lower()
     print("  Healthy plant diagnosis: PASSED")
 
-    # 7. Whole-Plant Supported Route & Isolation Test
-    print("\n7. Testing Whole-Plant Supported Route & Isolation...")
+    # 7. Whole-Plant Untrained Viewpoint Safe Abstention Test
+    print("\n7. Testing Whole-Plant Field View Safe Abstention...")
     wp_path = config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg"
     res_wp = predictor.predict(wp_path, user_crop_hint="Tomato", user_part_hint="whole_plant")
     print(f"  Status: {res_wp['status']}")
     print(f"  Message: {res_wp['top1_label']}")
     print(f"  Candidates: {res_wp['predictions']}")
-    print(f"  Source Evidence: {res_wp['source_evidence']['source_title'] if res_wp['source_evidence'] else None}")
+    print(f"  Source Evidence: {res_wp['source_evidence']}")
 
-    assert res_wp["status"] in ["confident", "probable_diagnosis_needs_confirmation"]
-    for cand in res_wp["predictions"]:
-        assert "tomato" in cand["label"].lower(), f"Contamination in Tomato whole-plant: {cand['label']}"
-    assert res_wp["source_evidence"] is not None
-    assert "https://" in res_wp["source_evidence"]["url"]
-    print("  Whole-plant supported route & zero contamination: PASSED")
+    assert res_wp["status"] == "unsupported_crop_part"
+    assert "not trained yet" in res_wp["top1_label"].lower()
+    assert len(res_wp["predictions"]) == 0, "Unsupported viewpoint must NOT list candidate diseases!"
+    assert res_wp["source_evidence"] is None, "Unsupported viewpoint must NOT show disease management link!"
+    print("  Whole-plant safe abstention: PASSED")
 
     # 8. Unsupported Route Safe Abstention Test
     # If a crop + plant-part combination has no validated model (e.g. Cotton whole plant, Banana stem),
@@ -148,7 +147,7 @@ def test_zero_cross_crop_contamination():
         assert r["status"] == "unsupported_crop_part"
         assert len(r["predictions"]) == 0, f"Unsupported route {test_name} must NOT return candidates!"
         assert r["source_evidence"] is None, f"Unsupported route {test_name} must NOT return chemical links!"
-        assert "not yet supported" in r["top1_label"].lower()
+        assert "not trained yet" in r["top1_label"].lower() or "not yet supported" in r["top1_label"].lower()
     print("  Unsupported route safe abstention: PASSED")
 
     # 9. Blurry Image Test

@@ -20,6 +20,7 @@ from src.orchestrator.weather import WeatherService
 from src.rag.retriever import get_retriever
 from src.tabular.predict import CropPredictor
 from src.vision.predict import PlantDiseasePredictor
+from src.whole_plant.predict import WholePlantPredictor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -31,6 +32,7 @@ class AutonomousRouter:
         logging.info("Initializing AutonomousRouter modules...")
         self.tabular_predictor = CropPredictor()
         self.vision_predictor = PlantDiseasePredictor()
+        self.whole_plant_predictor = WholePlantPredictor()
         self.retriever = get_retriever()
         self.weather_service = WeatherService()
 
@@ -168,18 +170,28 @@ class AutonomousRouter:
 
         # 1. Vision Module: Run ONLY when a NEW image is uploaded
         if has_new_image:
-            logging.info("AutonomousRouter: Running Whole-Plant Vision (New Image Uploaded)...")
-            modules_run.append("Whole-Plant Vision (DINOv2 + Multi-Scale Pathology)")
-            dinov2_thresh = kwargs.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
-            vision_result = self.vision_predictor.predict(
-                image_input,
-                user_crop_hint=kwargs.get("crop_hint", getattr(state.profile, "active_crop", None)),
-                user_part_hint=kwargs.get("part_hint", None),
-                soil_ph=getattr(state.profile, "soil_ph", None),
-                growth_stage=kwargs.get("growth_stage", None),
-                symptom_duration=kwargs.get("symptom_duration", None),
-                dinov2_threshold=dinov2_thresh,
-            )
+            user_part_hint = kwargs.get("part_hint", None)
+            if user_part_hint in ["Whole Plant", "whole_plant"]:
+                logging.info("AutonomousRouter: Routing to independent Whole-Plant Model...")
+                modules_run.append("Whole-Plant Photo Analysis (Independent Model)")
+                wp_res = self.whole_plant_predictor.predict(
+                    image_input,
+                    crop_hint=kwargs.get("crop_hint", getattr(state.profile, "active_crop", None)),
+                )
+                vision_result = wp_res.to_dict()
+            else:
+                logging.info("AutonomousRouter: Running Standard Vision...")
+                modules_run.append("Whole-Plant Vision (DINOv2 + Multi-Scale Pathology)")
+                dinov2_thresh = kwargs.get("dinov2_threshold", config.DINOV2_PLANT_OOD_THRESHOLD)
+                vision_result = self.vision_predictor.predict(
+                    image_input,
+                    user_crop_hint=kwargs.get("crop_hint", getattr(state.profile, "active_crop", None)),
+                    user_part_hint=user_part_hint,
+                    soil_ph=getattr(state.profile, "soil_ph", None),
+                    growth_stage=kwargs.get("growth_stage", None),
+                    symptom_duration=kwargs.get("symptom_duration", None),
+                    dinov2_threshold=dinov2_thresh,
+                )
             state.set_vision_result(vision_result, image_hash=image_hash)
             primary_intent = "disease_diagnosis"
         elif wants_weather:

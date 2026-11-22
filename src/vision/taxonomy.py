@@ -18,9 +18,11 @@ class PlantPart(str, Enum):
     CANOPY = "canopy"
     STEM = "stem"
     FRUIT = "fruit"
-    FLOWER = "flower"
     ROOT = "root"
-    BARK_TRUNK = "bark_trunk"
+    BARK = "bark"
+    BARK_TRUNK = "bark"
+    FLOWER = "flower"
+    NON_PLANT = "non_plant"
     UNKNOWN = "unknown"
 
     @classmethod
@@ -31,6 +33,8 @@ class PlantPart(str, Enum):
         for member in cls:
             if member.value == v or member.name.lower() == v:
                 return member
+        if "non_plant" in v or "nonplant" in v or "not_plant" in v:
+            return cls.NON_PLANT
         if "leaf" in v or "foliage" in v:
             return cls.LEAF
         if "whole" in v or "plant" in v:
@@ -38,15 +42,15 @@ class PlantPart(str, Enum):
         if "canopy" in v or "field" in v:
             return cls.CANOPY
         if "bark" in v or "trunk" in v or "wood" in v:
-            return cls.BARK_TRUNK
+            return cls.BARK
         if "stem" in v or "twig" in v or "branch" in v:
             return cls.STEM
         if "fruit" in v or "pod" in v or "berry" in v or "grain" in v:
             return cls.FRUIT
-        if "flower" in v or "blossom" in v:
-            return cls.FLOWER
         if "root" in v or "tuber" in v:
             return cls.ROOT
+        if "flower" in v or "blossom" in v:
+            return cls.FLOWER
         return cls.UNKNOWN
 
 

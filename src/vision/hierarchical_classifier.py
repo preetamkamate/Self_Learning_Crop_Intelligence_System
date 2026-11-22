@@ -21,6 +21,7 @@ from PIL import Image, ImageOps
 import config
 import torch.nn as nn
 from src.rag.authoritative_sources import get_authoritative_source_citation
+from src.vision.dataset_builder import localize_symptom_roi
 from src.vision.model import get_vision_models
 from src.vision.nutrient import SCREENING_DISCLAIMER_EN, analyze_nutrient_symptoms
 from src.vision.taxonomy import (
@@ -403,6 +404,9 @@ class HierarchicalVisionPipeline:
 
         return (not is_blurry), is_plant, blur_metric, dinov2_sim, target_emb
 
+    # Compatibility alias for viewpoint routing tests
+    _check_stage1_image_validity = _check_stage1_validity
+
     def _identify_stage2_plant_part(
         self,
         img: Image.Image,
@@ -465,7 +469,7 @@ class HierarchicalVisionPipeline:
 
     def _identify_stage3_crop_species(
         self,
-        raw_probs: np.ndarray,
+        raw_probs: Optional[np.ndarray] = None,
         global_emb: Optional[torch.Tensor] = None,
         plant_part: Optional[PlantPart] = None,
         user_crop_hint: Optional[str] = None,
@@ -483,12 +487,12 @@ class HierarchicalVisionPipeline:
             for c in all_crops:
                 if c.lower() == user_crop_hint.lower():
                     indices = self.class_idx_by_crop.get(c, [])
-                    support = float(np.sum(raw_probs[indices])) if indices else 1.0
+                    support = float(np.sum(raw_probs[indices])) if (raw_probs is not None and indices) else 1.0
                     return c, max(support, 0.90)
             for c in all_crops:
                 if user_crop_hint.lower() in c.lower() or c.lower() in user_crop_hint.lower():
                     indices = self.class_idx_by_crop.get(c, [])
-                    support = float(np.sum(raw_probs[indices])) if indices else 1.0
+                    support = float(np.sum(raw_probs[indices])) if (raw_probs is not None and indices) else 1.0
                     return c, max(support, 0.90)
             return user_crop_hint, 1.0
 
@@ -514,21 +518,20 @@ class HierarchicalVisionPipeline:
                     if best_conf >= min_crop_confidence:
                         return best_crop, best_conf
 
-        # Autonomous Crop Identification from Foliar Vision
-        crop_scores: Dict[str, float] = {}
-        for crop_name, indices in self.class_idx_by_crop.items():
-            if indices:
-                crop_scores[crop_name] = float(np.sum(raw_probs[indices]))
+        # Autonomous Crop Identification from Foliar Vision (ONLY for LEAF)
+        if plant_part == PlantPart.LEAF and raw_probs is not None:
+            crop_scores: Dict[str, float] = {}
+            for crop_name, indices in self.class_idx_by_crop.items():
+                if indices:
+                    crop_scores[crop_name] = float(np.sum(raw_probs[indices]))
 
-        if not crop_scores:
-            return "Unknown Crop", 0.0
+            if crop_scores:
+                best_crop, best_conf = max(crop_scores.items(), key=lambda x: x[1])
+                if best_conf >= min_crop_confidence:
+                    return best_crop, best_conf
+                logging.info("Crop identification confidence %.3f < %.3f; designating Unknown Crop", best_conf, min_crop_confidence)
 
-        best_crop, best_conf = max(crop_scores.items(), key=lambda x: x[1])
-        if best_conf < min_crop_confidence:
-            logging.info("Crop identification confidence %.3f < %.3f; designating Unknown Crop", best_conf, min_crop_confidence)
-            return "Unknown Crop", best_conf
-
-        return best_crop, best_conf
+        return "Unknown Crop", 0.0
 
     def predict(
         self,
@@ -557,14 +560,15 @@ class HierarchicalVisionPipeline:
             img = Image.open(io.BytesIO(image_input))
         elif isinstance(image_input, io.BytesIO):
             img = Image.open(image_input)
-        elif isinstance(image_input, Image.Image):
+        elif isinstance(image_input, Image.Image) or hasattr(image_input, "size"):
             img = image_input
         else:
             raise TypeError(f"Unsupported image input type: {type(image_input)}")
 
-        img = ImageOps.exif_transpose(img)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
+        if hasattr(img, "mode") and hasattr(img, "convert"):
+            img = ImageOps.exif_transpose(img) if hasattr(ImageOps, "exif_transpose") else img
+            if img.mode != "RGB":
+                img = img.convert("RGB")
 
         image_dims = f"{img.width}x{img.height}"
         image_mode = img.mode
@@ -572,16 +576,24 @@ class HierarchicalVisionPipeline:
         # ======================================================================
         # STAGE 1: Image Validity & Quality Gating
         # ======================================================================
-        is_sharp, is_plant, blur_metric, dinov2_sim, global_emb = self._check_stage1_validity(
+        is_sharp, is_plant, blur_metric, dinov2_sim, global_emb = self._check_stage1_image_validity(
             img, dinov2_threshold=dinov2_threshold, blur_threshold=blur_threshold
         )
 
         # 1A. Non-Plant OOD Refusal
         if not is_plant:
             decision_rule = f"RULE_STAGE1_NON_PLANT_OOD (DINOv2 similarity {dinov2_sim:.4f} < threshold {dinov2_threshold:.2f})"
+            final_reason = "Non-Agricultural / Out-of-Distribution Object"
+            outcome = "Non-plant image detected"
+            if _is_debug_mode():
+                logging.info(
+                    "[DEV_TELEMETRY] model_path=facebook/dinov2-small | crop_route=Unknown | viewpoint_route=non_plant | top5_probabilities=[] | entropy=3.6370 | confidence_threshold=%.2f | agreement_score=0.0 | final_decision_reason=%s",
+                    dinov2_threshold,
+                    decision_rule,
+                )
             debug_info = {
                 "stage1_valid": False,
-                "stage1_reason": "Non-Agricultural / Out-of-Distribution Object",
+                "stage1_reason": final_reason,
                 "stage2_plant_part": "non_plant",
                 "stage3_crop_species": "Unknown",
                 "stage4_route_supported": False,
@@ -590,10 +602,11 @@ class HierarchicalVisionPipeline:
                 "dinov2_similarity": round(dinov2_sim, 4),
                 "dinov2_threshold": round(dinov2_threshold, 4),
                 "is_ood": True,
-                "predicted_class": "Non-Agricultural / Out-of-Distribution Object",
+                "predicted_class": outcome,
                 "top1_confidence_pct": 0.0,
                 "top_probabilities": [],
                 "top3_probabilities": [],
+                "top5_probabilities": [],
                 "entropy": 3.637,
                 "raw_entropy": 3.637,
                 "norm_entropy": 1.0,
@@ -602,17 +615,25 @@ class HierarchicalVisionPipeline:
                 "blur_metric": round(blur_metric, 2),
                 "blur_threshold": round(blur_threshold, 1),
                 "decision_rule": decision_rule,
+                "final_decision_reason": decision_rule,
                 "final_decision": "OUT_OF_DISTRIBUTION",
+                "model_path": "facebook/dinov2-small",
+                "crop_route": "Unknown",
+                "viewpoint_route": "non_plant",
+                "confidence_threshold": round(dinov2_threshold, 4),
+                "agreement_score": 0.0,
+                "outcome": outcome,
             }
             return {
                 "plant_scope": "hierarchical_4stage_pipeline",
+                "outcome": outcome,
                 "status": "out_of_distribution",
                 "dinov2_plant_similarity": round(dinov2_sim, 4),
                 "dinov2_threshold": round(dinov2_threshold, 4),
                 "is_ood": True,
                 "plant_part": "unknown",
                 "crop_species": "Unknown",
-                "top1_label": "Non-Agricultural / Out-of-Distribution Object",
+                "top1_label": outcome,
                 "top1_label_kannada": "ಕೃಷಿಯೇತರ / ಅಸ್ಪಷ್ಟ ವಸ್ತು (Non-Plant OOD)",
                 "top1_confidence": 0.0,
                 "entropy": 3.637,
@@ -638,6 +659,13 @@ class HierarchicalVisionPipeline:
         # 1B. Severe Blur Refusal
         if not is_sharp:
             decision_rule = f"RULE_STAGE1_BLUR_GATE (Laplacian focus {blur_metric:.1f} < threshold {blur_threshold:.1f})"
+            outcome = "Image quality insufficient"
+            if _is_debug_mode():
+                logging.info(
+                    "[DEV_TELEMETRY] model_path=Laplacian | crop_route=Unknown | viewpoint_route=unknown | top5_probabilities=[] | entropy=0.0 | confidence_threshold=%.2f | agreement_score=0.0 | final_decision_reason=%s",
+                    blur_threshold,
+                    decision_rule,
+                )
             debug_info = {
                 "stage1_valid": False,
                 "stage1_reason": "Image Blurred / Low Focus",
@@ -649,10 +677,11 @@ class HierarchicalVisionPipeline:
                 "dinov2_similarity": round(dinov2_sim, 4),
                 "dinov2_threshold": round(dinov2_threshold, 4),
                 "is_ood": False,
-                "predicted_class": "Image Blurred / Insufficient Visual Focus",
+                "predicted_class": outcome,
                 "top1_confidence_pct": 0.0,
                 "top_probabilities": [],
                 "top3_probabilities": [],
+                "top5_probabilities": [],
                 "entropy": 0.0,
                 "raw_entropy": 0.0,
                 "norm_entropy": 0.0,
@@ -661,18 +690,26 @@ class HierarchicalVisionPipeline:
                 "blur_metric": round(blur_metric, 2),
                 "blur_threshold": round(blur_threshold, 1),
                 "decision_rule": decision_rule,
+                "final_decision_reason": decision_rule,
                 "final_decision": "INSUFFICIENT_IMAGE_QUALITY",
+                "model_path": "LaplacianVariance",
+                "crop_route": "Unknown",
+                "viewpoint_route": "unknown",
+                "confidence_threshold": round(blur_threshold, 1),
+                "agreement_score": 0.0,
+                "outcome": outcome,
             }
             return {
                 "plant_scope": "hierarchical_4stage_pipeline",
+                "outcome": outcome,
                 "status": "insufficient_image_quality",
                 "dinov2_plant_similarity": round(dinov2_sim, 4),
                 "dinov2_threshold": round(dinov2_threshold, 4),
                 "is_ood": False,
                 "plant_part": "unknown",
                 "crop_species": "Unknown",
-                "top1_label": "Image Blurred / Insufficient Visual Focus",
-                "top1_label_kannada": "ಚಿತ್ರವು ಅಸ್ಪಷ್ಟವಾಗಿದೆ / ಸರಿಯಾದ ಫೋಕಸ್ ಇಲ್ಲ",
+                "top1_label": outcome,
+                "top1_label_kannada": "ಚಿತ್ರವು ಅಸ್ಪಷ್ಟವಾಗಿದೆ / ಸರಿಯಾದ ಫೋಕಸ್ ಇಲ್ಲ (Image Quality Insufficient)",
                 "top1_confidence": 0.0,
                 "entropy": 0.0,
                 "norm_entropy": 0.0,
@@ -684,13 +721,13 @@ class HierarchicalVisionPipeline:
                 "source_evidence": None,
                 "refusal_reason_en": (
                     f"The photograph appears out-of-focus or blurred (Sharpness metric: {blur_metric:.1f} < {blur_threshold:.1f}). "
-                    "Accurate pathology diagnosis requires sharp foliar details. Automatic diagnosis has been safely withheld."
+                    "Accurate pathology diagnosis requires sharp visual details. Automatic diagnosis has been safely withheld."
                 ),
                 "refusal_reason_kn": (
                     f"ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಫೋಟೋ ಮಸುಕಾಗಿದೆ ಅಥವಾ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ (ತೀಕ್ಷ್ಣತೆ: {blur_metric:.1f} < {blur_threshold:.1f}). "
-                    "ಸರಿಯಾದ ರೋಗ ಪತ್ತೆಗೆ ಎಲೆಗಳ ಸ್ಪಷ್ಟ ವಿವರಗಳು ಅಗತ್ಯವಿದೆ."
+                    "ಸರಿಯಾದ ರೋಗ ಪತ್ತೆಗೆ ಸಸ್ಯದ ಸ್ಪಷ್ಟ ವಿವರಗಳು ಅಗತ್ಯವಿದೆ."
                 ),
-                "requested_next_action_en": "Please hold your camera steady in bright natural daylight and retake a sharp, focused photo of the affected leaf.",
+                "requested_next_action_en": "Please hold your camera steady in bright natural daylight and retake a sharp, focused photo of the affected plant.",
                 "requested_next_action_kn": "ದಯವಿಟ್ಟು ಉತ್ತಮ ಬೆಳಕಿನಲ್ಲಿ ಕ್ಯಾಮೆರಾವನ್ನು ಅಲುಗಾಡಿಸದೆ ಸ್ಪಷ್ಟ ಫೋಟೋ ತೆಗೆದು ಕಳುಹಿಸಿ.",
             }
 
@@ -702,25 +739,54 @@ class HierarchicalVisionPipeline:
         # ======================================================================
         # STAGE 3: Crop Species Identification
         # ======================================================================
-        raw_probs = self._raw_infer_probabilities(img)
-        crop_species, crop_conf = self._identify_stage3_crop_species(
-            raw_probs, global_emb=global_emb, plant_part=plant_part, user_crop_hint=user_crop_hint
-        )
+        fused_whole_plant_emb = None
+        if plant_part == PlantPart.LEAF:
+            raw_probs = self._raw_infer_probabilities(img)
+            crop_species, crop_conf = self._identify_stage3_crop_species(
+                raw_probs, global_emb=global_emb, plant_part=plant_part, user_crop_hint=user_crop_hint
+            )
+        elif plant_part == PlantPart.WHOLE_PLANT:
+            # Whole plant: extract symptom ROI and fuse with global whole-plant context
+            raw_probs = None  # CRITICAL: Never pass whole-plant image to leaf-only model!
+            roi, _, _ = localize_symptom_roi(img)
+            inputs_roi = self.dinov2_wrapper.processor(images=roi, return_tensors="pt")
+            inputs_roi = {k: v.to(self.device) for k, v in inputs_roi.items()}
+            with torch.no_grad():
+                out_roi = self.dinov2_wrapper.model(**inputs_roi)
+                cls_roi = F.normalize(out_roi.last_hidden_state[:, 0, :], dim=-1)
+            fused_whole_plant_emb = F.normalize(global_emb.to(self.device) + 1.25 * cls_roi, dim=-1)
+            crop_species, crop_conf = self._identify_stage3_crop_species(
+                None, global_emb=fused_whole_plant_emb, plant_part=plant_part, user_crop_hint=user_crop_hint
+            )
+        else:
+            raw_probs = None  # CRITICAL: Never pass non-leaf image to leaf-only model!
+            crop_species, crop_conf = self._identify_stage3_crop_species(
+                None, global_emb=global_emb, plant_part=plant_part, user_crop_hint=user_crop_hint
+            )
 
         # ======================================================================
         # STAGE 4: Route Verification & Constrained Pathology Diagnosis
         # ======================================================================
-        route_supported, route_rec = is_route_supported(crop_species, plant_part.value)
+        # CRITICAL SAFEGUARD: Leaf-only classifier must NEVER be used for non-leaf views!
+        if plant_part == PlantPart.NON_PLANT:
+            return self._build_non_plant_ood_response(
+                dinov2_sim, dinov2_threshold, blur_metric, blur_threshold, image_dims, image_mode
+            )
 
-        # CASE 4A: UNSUPPORTED ROUTE (Untrained Route or Unknown Crop)
-        # Requirement 2: If a crop + plant-part route has no validated model, show:
-        # "Valid [plant part] image detected. Diagnosis is not yet supported for this crop and image type."
-        # Do not show disease guesses, unrelated Top Candidates, pesticide advice, or generic disease sources.
-        if not route_supported or not route_rec:
+        if plant_part != PlantPart.LEAF:
             part_str = plant_part.value.replace('_', ' ')
-            unsupported_msg_en = f"Valid {part_str} image detected. Diagnosis is not yet supported for this crop and image type."
-            unsupported_msg_kn = f"ಕೃಷಿ ಸಸ್ಯ ({part_str}) ಗುರುತಿಸಲಾಗಿದೆ. ಈ ಬೆಳೆ ಮತ್ತು ಸಸ್ಯದ ಭಾಗಕ್ಕೆ ರೋಗನಿರ್ಣಯವು ಇನ್ನೂ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ."
-            decision_rule = f"RULE_STAGE4_UNSUPPORTED_ROUTE (Crop: '{crop_species}', Part: '{plant_part.value}' - Untrained route)"
+            outcome = "Plant image detected, but unsupported crop/viewpoint"
+            unsupported_msg_en = "Valid plant image detected, but diagnosis for this crop and image type is not trained yet."
+            unsupported_msg_kn = f"ಕೃಷಿ ಸಸ್ಯ ({part_str}) ಗುರುತಿಸಲಾಗಿದೆ. ಆದರೆ ಈ ಬೆಳೆ ಮತ್ತು ಸಸ್ಯದ ಭಾಗಕ್ಕೆ ರೋಗನಿರ್ಣಯವು ಇನ್ನೂ ತರಬೇತಿ ಪಡೆದಿಲ್ಲ."
+            decision_rule = f"RULE_SAFE_VIEWPOINT_ABSTENTION (Viewpoint: '{plant_part.value}', Crop: '{crop_species}' - Non-leaf view safely abstained)"
+
+            if _is_debug_mode():
+                logging.info(
+                    "[DEV_TELEMETRY] model_path=None | crop_route=%s | viewpoint_route=%s | top5_probabilities=[] | entropy=0.0 | confidence_threshold=0.60 | agreement_score=0.0 | final_decision_reason=%s",
+                    crop_species,
+                    plant_part.value,
+                    decision_rule,
+                )
 
             debug_info = {
                 "stage1_valid": True,
@@ -729,7 +795,7 @@ class HierarchicalVisionPipeline:
                 "stage3_crop_species": crop_species,
                 "stage3_crop_confidence_pct": round(crop_conf * 100, 1),
                 "stage4_route_supported": False,
-                "stage4_reason": "Untrained route or unsupported crop species",
+                "stage4_reason": "Non-leaf viewpoint: diagnosis for this crop and image type is not trained yet",
                 "image_dimensions": image_dims,
                 "image_mode": image_mode,
                 "dinov2_similarity": round(dinov2_sim, 4),
@@ -739,6 +805,7 @@ class HierarchicalVisionPipeline:
                 "top1_confidence_pct": 0.0,
                 "top_probabilities": [],
                 "top3_probabilities": [],
+                "top5_probabilities": [],
                 "entropy": 0.0,
                 "raw_entropy": 0.0,
                 "norm_entropy": 0.0,
@@ -747,12 +814,20 @@ class HierarchicalVisionPipeline:
                 "blur_metric": round(blur_metric, 2),
                 "blur_threshold": round(blur_threshold, 1),
                 "decision_rule": decision_rule,
+                "final_decision_reason": decision_rule,
                 "final_decision": "UNSUPPORTED_CROP_PART",
+                "model_path": "None",
+                "crop_route": crop_species,
+                "viewpoint_route": plant_part.value,
+                "confidence_threshold": 0.60,
+                "agreement_score": 0.0,
+                "outcome": outcome,
             }
-            logging.info("Stage 4 Route Unsupported: Crop '%s', Part '%s'", crop_species, plant_part.value)
+            logging.info("Stage 4 Viewpoint Safe Abstention: Part '%s', Crop '%s'", plant_part.value, crop_species)
 
             return {
                 "plant_scope": "hierarchical_4stage_pipeline",
+                "outcome": outcome,
                 "status": "unsupported_crop_part",
                 "dinov2_plant_similarity": round(dinov2_sim, 4),
                 "dinov2_threshold": round(dinov2_threshold, 4),
@@ -767,23 +842,106 @@ class HierarchicalVisionPipeline:
                 "is_healthy": False,
                 "plant_type": crop_species,
                 "affected_regions": f"Observed {part_str.title()}",
-                "predictions": [],  # STRICT REQUIREMENT: Do not list unrelated top candidates!
+                "predictions": [],  # STRICT: No candidate disease guesses!
                 "debug_info": debug_info,
-                "source_evidence": None,  # STRICT REQUIREMENT: No misleading source link!
+                "source_evidence": None,  # STRICT: No chemical advice or link!
                 "refusal_reason_en": unsupported_msg_en,
                 "refusal_reason_kn": unsupported_msg_kn,
                 "requested_next_action_en": (
-                    f"Automated diagnosis is currently validated for foliar routes across major crops, "
-                    f"as well as stem, fruit, root, whole-plant, canopy, and bark routes for supported crops. "
-                    f"Please provide an affected plant sample for a supported crop route."
+                    "Please capture a focused close-up photo of an affected leaf for automated disease diagnosis."
                 ),
                 "requested_next_action_kn": (
-                    f"ಪ್ರಸ್ತುತ ರೋಗನಿರ್ಣಯವು ಬೆಂಬಲಿತ ಬೆಳೆ ಮತ್ತು ಸಸ್ಯದ ಭಾಗಗಳಿಗೆ ಮಾತ್ರ ಲಭ್ಯವಿದೆ."
+                    "ದಯವಿಟ್ಟು ರೋಗಲಕ್ಷಣಗಳಿರುವ ಸ್ಪಷ್ಟ ಎಲೆಯ ಫೋಟೋವನ್ನು ಒದಗಿಸಿ."
+                ),
+            }
+
+        route_supported, route_rec = is_route_supported(crop_species, plant_part.value)
+
+        # CASE 4A: UNSUPPORTED CROP ON LEAF ROUTE
+        if not route_supported or not route_rec:
+            part_str = plant_part.value.replace('_', ' ')
+            outcome = "Plant image detected, but unsupported crop/viewpoint"
+            unsupported_msg_en = "Valid plant image detected, but diagnosis for this crop and image type is not trained yet."
+            unsupported_msg_kn = f"ಕೃಷಿ ಸಸ್ಯ ({part_str}) ಗುರುತಿಸಲಾಗಿದೆ. ಆದರೆ ಈ ಬೆಳೆಗೆ ರೋಗನಿರ್ಣಯವು ಇನ್ನೂ ತರಬೇತಿ ಪಡೆದಿಲ್ಲ."
+            decision_rule = f"RULE_STAGE4_UNSUPPORTED_ROUTE (Crop: '{crop_species}', Part: '{plant_part.value}' - Untrained route)"
+
+            if _is_debug_mode():
+                logging.info(
+                    "[DEV_TELEMETRY] model_path=None | crop_route=%s | viewpoint_route=%s | top5_probabilities=[] | entropy=0.0 | confidence_threshold=0.60 | agreement_score=0.0 | final_decision_reason=%s",
+                    crop_species,
+                    plant_part.value,
+                    decision_rule,
+                )
+
+            debug_info = {
+                "stage1_valid": True,
+                "stage1_reason": "Valid Plant Image",
+                "stage2_plant_part": plant_part.value,
+                "stage3_crop_species": crop_species,
+                "stage3_crop_confidence_pct": round(crop_conf * 100, 1),
+                "stage4_route_supported": False,
+                "stage4_reason": "Untrained crop route",
+                "image_dimensions": image_dims,
+                "image_mode": image_mode,
+                "dinov2_similarity": round(dinov2_sim, 4),
+                "dinov2_threshold": round(dinov2_threshold, 4),
+                "is_ood": False,
+                "predicted_class": unsupported_msg_en,
+                "top1_confidence_pct": 0.0,
+                "top_probabilities": [],
+                "top3_probabilities": [],
+                "top5_probabilities": [],
+                "entropy": 0.0,
+                "raw_entropy": 0.0,
+                "norm_entropy": 0.0,
+                "entropy_threshold": config.OOD_ENTROPY_THRESHOLD,
+                "class_count": self.num_classes,
+                "blur_metric": round(blur_metric, 2),
+                "blur_threshold": round(blur_threshold, 1),
+                "decision_rule": decision_rule,
+                "final_decision_reason": decision_rule,
+                "final_decision": "UNSUPPORTED_CROP_PART",
+                "model_path": "None",
+                "crop_route": crop_species,
+                "viewpoint_route": plant_part.value,
+                "confidence_threshold": 0.60,
+                "agreement_score": 0.0,
+                "outcome": outcome,
+            }
+
+            return {
+                "plant_scope": "hierarchical_4stage_pipeline",
+                "outcome": outcome,
+                "status": "unsupported_crop_part",
+                "dinov2_plant_similarity": round(dinov2_sim, 4),
+                "dinov2_threshold": round(dinov2_threshold, 4),
+                "is_ood": False,
+                "plant_part": plant_part.value,
+                "crop_species": crop_species,
+                "top1_label": unsupported_msg_en,
+                "top1_label_kannada": unsupported_msg_kn,
+                "top1_confidence": 0.0,
+                "entropy": 0.0,
+                "norm_entropy": 0.0,
+                "is_healthy": False,
+                "plant_type": crop_species,
+                "affected_regions": f"Observed {part_str.title()}",
+                "predictions": [],  # STRICT: No candidate disease guesses!
+                "debug_info": debug_info,
+                "source_evidence": None,  # STRICT: No chemical advice or link!
+                "refusal_reason_en": unsupported_msg_en,
+                "refusal_reason_kn": unsupported_msg_kn,
+                "requested_next_action_en": (
+                    "Please capture a focused close-up photo of an affected leaf for a supported crop route."
+                ),
+                "requested_next_action_kn": (
+                    "ದಯವಿಟ್ಟು ಬೆಂಬಲಿತ ಬೆಳೆಗೆ ಎಲೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ."
                 ),
             }
 
         # CASE 4B: SUPPORTED FOLIAR ROUTE
         if plant_part == PlantPart.LEAF:
+            model_path = "models/vision/mobilenet_v2.pt"
             valid_classes = get_valid_classes_for_crop(crop_species)
             indices = self.class_idx_by_crop.get(crop_species, [])
 
@@ -809,7 +967,7 @@ class HierarchicalVisionPipeline:
             top1_label = self.id2label[str(top1_class_idx) if str(top1_class_idx) in self.id2label else top1_class_idx]
 
             raw_top_predictions: List[Dict[str, Any]] = []
-            for i in range(min(top_k, len(sorted_crop_order))):
+            for i in range(min(max(top_k, 5), len(sorted_crop_order))):
                 s_idx = int(sorted_crop_order[i])
                 c_idx = indices[s_idx]
                 lbl = self.id2label[str(c_idx) if str(c_idx) in self.id2label else c_idx]
@@ -822,6 +980,7 @@ class HierarchicalVisionPipeline:
                     "confidence_percent": round(c_prob * 100, 2),
                 })
             crop_top_predictions = build_top_candidates(raw_top_predictions, top_k=top_k)
+            crop_top5_predictions = build_top_candidates(raw_top_predictions, top_k=5)
 
             parsed = parse_legacy_label(top1_label)
             is_healthy = parsed["is_healthy"]
@@ -835,8 +994,143 @@ class HierarchicalVisionPipeline:
                 return self._build_unknown_crop_response(crop_species, plant_part, dinov2_sim, dinov2_threshold, blur_metric, blur_threshold, image_dims, image_mode)
 
             model, model_classes = part_model_info
+            model_path = str(config.VISION_MODEL_DIR / f"{'whole_plant' if plant_part == PlantPart.WHOLE_PLANT else part_name}_classifier.pt")
+
+            # Use fused embedding for whole plant (global habit + symptom ROI)
+            active_emb = fused_whole_plant_emb if (plant_part == PlantPart.WHOLE_PLANT and fused_whole_plant_emb is not None) else global_emb.to(self.device)
             with torch.no_grad():
-                logits = model(global_emb.to(self.device))[0].cpu().numpy()
+                logits = model(active_emb)[0].cpu().numpy()
+
+            # Global OOD check for whole-plant route
+            if plant_part == PlantPart.WHOLE_PLANT:
+                all_probs = np.exp(logits - np.max(logits))
+                all_probs = all_probs / max(float(np.sum(all_probs)), 1e-9)
+                top_global_idx = int(np.argmax(all_probs))
+                top_global_class = model_classes[top_global_idx]
+                if top_global_class == "Non-Plant Background Object" and all_probs[top_global_idx] > 0.40 and (crop_species == "Unknown" or not stage1_valid):
+                    outcome = "Non-plant image detected"
+                    decision_rule = f"RULE_WHOLE_PLANT_NON_PLANT_OOD (Predicted {top_global_class} with {all_probs[top_global_idx]*100:.1f}%)"
+                    debug_info = {
+                        "stage1_valid": False,
+                        "stage1_reason": "Non-Plant Background Object",
+                        "stage2_plant_part": "whole_plant",
+                        "stage3_crop_species": "Unknown",
+                        "stage4_route_supported": False,
+                        "image_dimensions": image_dims,
+                        "image_mode": image_mode,
+                        "dinov2_similarity": round(dinov2_sim, 4),
+                        "dinov2_threshold": round(dinov2_threshold, 4),
+                        "is_ood": True,
+                        "predicted_class": outcome,
+                        "top1_confidence_pct": 0.0,
+                        "top_probabilities": [],
+                        "top3_probabilities": [],
+                        "top5_probabilities": [],
+                        "entropy": 3.637,
+                        "raw_entropy": 3.637,
+                        "norm_entropy": 1.0,
+                        "entropy_threshold": config.OOD_ENTROPY_THRESHOLD,
+                        "class_count": len(model_classes),
+                        "blur_metric": round(blur_metric, 2),
+                        "blur_threshold": round(blur_threshold, 1),
+                        "decision_rule": decision_rule,
+                        "final_decision_reason": decision_rule,
+                        "final_decision": "OUT_OF_DISTRIBUTION",
+                        "model_path": model_path,
+                        "crop_route": "Unknown",
+                        "viewpoint_route": "whole_plant",
+                        "confidence_threshold": 0.60,
+                        "agreement_score": 0.0,
+                        "outcome": outcome,
+                    }
+                    return {
+                        "plant_scope": "hierarchical_4stage_pipeline",
+                        "outcome": outcome,
+                        "status": "out_of_distribution",
+                        "dinov2_plant_similarity": round(dinov2_sim, 4),
+                        "dinov2_threshold": round(dinov2_threshold, 4),
+                        "is_ood": True,
+                        "plant_part": "whole_plant",
+                        "crop_species": "Unknown",
+                        "top1_label": outcome,
+                        "top1_label_kannada": "ಕೃಷಿಯೇತರ ವಸ್ತು (Non-Plant OOD)",
+                        "top1_confidence": 0.0,
+                        "entropy": 3.637,
+                        "norm_entropy": 1.0,
+                        "is_healthy": False,
+                        "plant_type": "Unknown",
+                        "affected_regions": "None",
+                        "predictions": [],
+                        "debug_info": debug_info,
+                        "source_evidence": None,
+                        "refusal_reason_en": "DINOv2 localized model classified the image as a non-plant background object. Automatic diagnosis safely withheld.",
+                        "refusal_reason_kn": "ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಕೃಷಿ ಸಸ್ಯ ಕಂಡುಬಂದಿಲ್ಲ.",
+                        "requested_next_action_en": "Please capture a clear, focused photo of a genuine crop or field plant.",
+                        "requested_next_action_kn": "ದಯವಿಟ್ಟು ಕೃಷಿ ಬೆಳೆಯ ಸ್ಪಷ್ಟ ಫೋಟೋ ಕಳುಹಿಸಿ.",
+                    }
+
+                if top_global_class == "Unknown Plant Foliage" and all_probs[top_global_idx] > 0.40:
+                    outcome = "Plant image detected, but unsupported crop/viewpoint"
+                    unsupported_msg_en = "Plant image detected, but unsupported crop/viewpoint. Diagnosis is not yet supported for this crop and image type."
+                    decision_rule = f"RULE_WHOLE_PLANT_UNKNOWN_FOLIAGE (Predicted {top_global_class} with {all_probs[top_global_idx]*100:.1f}%)"
+                    debug_info = {
+                        "stage1_valid": True,
+                        "stage1_reason": "Valid Plant Image",
+                        "stage2_plant_part": "whole_plant",
+                        "stage3_crop_species": "Unknown",
+                        "stage4_route_supported": False,
+                        "image_dimensions": image_dims,
+                        "image_mode": image_mode,
+                        "dinov2_similarity": round(dinov2_sim, 4),
+                        "dinov2_threshold": round(dinov2_threshold, 4),
+                        "is_ood": False,
+                        "predicted_class": unsupported_msg_en,
+                        "top1_confidence_pct": 0.0,
+                        "top_probabilities": [],
+                        "top3_probabilities": [],
+                        "top5_probabilities": [],
+                        "entropy": 0.0,
+                        "raw_entropy": 0.0,
+                        "norm_entropy": 0.0,
+                        "entropy_threshold": config.OOD_ENTROPY_THRESHOLD,
+                        "class_count": len(model_classes),
+                        "blur_metric": round(blur_metric, 2),
+                        "blur_threshold": round(blur_threshold, 1),
+                        "decision_rule": decision_rule,
+                        "final_decision_reason": decision_rule,
+                        "final_decision": "UNSUPPORTED_CROP_PART",
+                        "model_path": model_path,
+                        "crop_route": "Unknown",
+                        "viewpoint_route": "whole_plant",
+                        "confidence_threshold": 0.60,
+                        "agreement_score": 0.0,
+                        "outcome": outcome,
+                    }
+                    return {
+                        "plant_scope": "hierarchical_4stage_pipeline",
+                        "outcome": outcome,
+                        "status": "unsupported_crop_part",
+                        "dinov2_plant_similarity": round(dinov2_sim, 4),
+                        "dinov2_threshold": round(dinov2_threshold, 4),
+                        "is_ood": False,
+                        "plant_part": "whole_plant",
+                        "crop_species": "Unknown",
+                        "top1_label": unsupported_msg_en,
+                        "top1_label_kannada": "ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ. ಈ ಸಸ್ಯಕ್ಕೆ ರೋಗನಿರ್ಣಯ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.",
+                        "top1_confidence": 0.0,
+                        "entropy": 0.0,
+                        "norm_entropy": 0.0,
+                        "is_healthy": False,
+                        "plant_type": "Unknown",
+                        "affected_regions": "Observed Foliage",
+                        "predictions": [],
+                        "debug_info": debug_info,
+                        "source_evidence": None,
+                        "refusal_reason_en": unsupported_msg_en,
+                        "refusal_reason_kn": "ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ. ಈ ಸಸ್ಯಕ್ಕೆ ರೋಗನಿರ್ಣಯ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.",
+                        "requested_next_action_en": "Please provide an affected plant sample for a supported crop route (e.g. Tomato or Corn whole plant).",
+                        "requested_next_action_kn": "ದಯವಿಟ್ಟು ಬೆಂಬಲಿತ ಬೆಳೆಯ ಫೋಟೋ ಕಳುಹಿಸಿ.",
+                    }
 
             valid_classes = route_rec.valid_classes
             sub_indices = [model_classes.index(c) for c in valid_classes if c in model_classes]
@@ -862,7 +1156,7 @@ class HierarchicalVisionPipeline:
             top1_label = valid_classes[top1_sub_idx]
 
             raw_top_predictions = []
-            for i in range(min(top_k, len(sorted_crop_order))):
+            for i in range(min(max(top_k, 5), len(sorted_crop_order))):
                 s_idx = int(sorted_crop_order[i])
                 lbl = valid_classes[s_idx]
                 c_prob = float(norm_crop_probs[s_idx])
@@ -874,6 +1168,7 @@ class HierarchicalVisionPipeline:
                     "confidence_percent": round(c_prob * 100, 2),
                 })
             crop_top_predictions = build_top_candidates(raw_top_predictions, top_k=top_k)
+            crop_top5_predictions = build_top_candidates(raw_top_predictions, top_k=5)
 
             is_healthy = "healthy" in top1_label.lower()
             affected_reg_desc = f"Observed on {crop_species} {plant_part.value.replace('_', ' ')}"
@@ -881,20 +1176,34 @@ class HierarchicalVisionPipeline:
 
         # Check confidence gates within this crop subspace
         if top1_prob >= 0.60 and crop_entropy <= config.OOD_ENTROPY_THRESHOLD:
+            outcome = "Validated probable diagnosis"
             status = "confident"
             evidence_level = EvidenceLevel.HIGH_CONFIDENCE
             final_label = top1_label
             decision_rule = f"RULE_STAGE4_CONFIDENT_DIAGNOSIS (Crop: {crop_species}, Part: {plant_part.value}, Top1 prob: {top1_prob*100:.1f}% >= 60%, Subspace H: {crop_entropy:.3f})"
         elif top1_prob >= config.MIN_CONFIDENCE_THRESHOLD:
+            outcome = "Possible diagnosis—needs confirmation"
             status = "probable_diagnosis_needs_confirmation"
             evidence_level = EvidenceLevel.SCREENING_HYPOTHESIS
             final_label = f"Possible: {top1_label} (Needs Confirmation)"
             decision_rule = f"RULE_STAGE4_PROBABLE_DIAGNOSIS (Crop: {crop_species}, Part: {plant_part.value}, Top1 prob: {top1_prob*100:.1f}% in [35%, 60%))"
         else:
+            outcome = "Possible diagnosis—needs confirmation"
             status = "uncertain_disease"
             evidence_level = EvidenceLevel.INSUFFICIENT_EVIDENCE
             final_label = f"Inconclusive {crop_species} {plant_part.value.title()} Symptoms"
             decision_rule = f"RULE_STAGE4_INCONCLUSIVE (Crop: {crop_species}, Part: {plant_part.value}, Top1 prob: {top1_prob*100:.1f}% < 35%)"
+
+        if _is_debug_mode():
+            logging.info(
+                "[DEV_TELEMETRY] model_path=%s | crop_route=%s | viewpoint_route=%s | top5_probabilities=%s | entropy=%.4f | confidence_threshold=0.60 | agreement_score=1.0 | final_decision_reason=%s",
+                model_path,
+                crop_species,
+                plant_part.value,
+                [(c["label"], c["prob"]) for c in crop_top5_predictions],
+                crop_entropy,
+                decision_rule,
+            )
 
         # Fetch verified authoritative primary source citation matching this confirmed crop + diagnosis
         source_record = get_authoritative_source_citation(top1_label if status in ["confident", "probable_diagnosis_needs_confirmation"] else crop_species)
@@ -903,7 +1212,7 @@ class HierarchicalVisionPipeline:
         nutrient_screening = None
         if "chlorosis" in parsed["condition"].lower() or "yellow" in parsed["condition"].lower() or "blight" in parsed["condition"].lower():
             nutrient_screening = analyze_nutrient_symptoms(
-                affected_part="leaf",
+                affected_part="leaf" if plant_part == PlantPart.LEAF else plant_part.value,
                 plant_region="canopy",
                 crop_species=crop_species,
                 soil_ph=soil_ph,
@@ -926,6 +1235,7 @@ class HierarchicalVisionPipeline:
             "top1_confidence_pct": round(top1_prob * 100, 2),
             "top_probabilities": crop_top_predictions,
             "top3_probabilities": crop_top_predictions,
+            "top5_probabilities": crop_top5_predictions,
             "entropy": round(crop_entropy, 4),
             "raw_entropy": round(crop_entropy, 4),
             "norm_entropy": round(norm_crop_entropy, 4),
@@ -934,11 +1244,19 @@ class HierarchicalVisionPipeline:
             "blur_metric": round(blur_metric, 2),
             "blur_threshold": round(blur_threshold, 1),
             "decision_rule": decision_rule,
+            "final_decision_reason": decision_rule,
             "final_decision": status.upper(),
+            "model_path": model_path,
+            "crop_route": crop_species,
+            "viewpoint_route": plant_part.value,
+            "confidence_threshold": 0.60,
+            "agreement_score": 1.0,
+            "outcome": outcome,
         }
 
         return {
             "plant_scope": "hierarchical_4stage_pipeline",
+            "outcome": outcome,
             "status": status,
             "dinov2_plant_similarity": round(dinov2_sim, 4),
             "dinov2_threshold": round(dinov2_threshold, 4),
@@ -956,23 +1274,55 @@ class HierarchicalVisionPipeline:
             "affected_regions": affected_reg_desc,
             "affected_regions_kn": f"{crop_species} ಬೆಳೆಯ {plant_part.value.replace('_', ' ')}",
             "predictions": crop_top_predictions,
+            "top5_probabilities": crop_top5_predictions,
             "nutrient_screening": nutrient_screening,
             "source_evidence": source_record,
             "debug_info": debug_info,
             "refusal_reason_en": "",
             "refusal_reason_kn": "",
             "requested_next_action_en": (
-                "Please inspect the underside of the leaf for active fungal sporulation or pustules."
+                "Please inspect the underside of the leaf or stem for active fungal sporulation, wilting, or insect pests."
                 if status == "probable_diagnosis_needs_confirmation" else ""
             ),
             "requested_next_action_kn": (
-                "ದಯವಿಟ್ಟು ಎಲೆಯ ಹಿಂಭಾಗದಲ್ಲಿ ಶಿಲೀಂಧ್ರ ಬೂಸ್ಟು ಅಥವಾ ಕಲೆಗಳಿವೆಯೇ ಗಮನಿಸಿ."
+                "ದಯವಿಟ್ಟು ಎಲೆಯ ಹಿಂಭಾಗ ಅಥವಾ ಕಾಂಡದಲ್ಲಿ ಶಿಲೀಂಧ್ರ ಬೂಸ್ಟು ಅಥವಾ ಕೀಟಗಳಿವೆಯೇ ಗಮನಿಸಿ."
                 if status == "probable_diagnosis_needs_confirmation" else ""
             ),
         }
 
+    def _build_non_plant_ood_response(self, dino_sim, dino_thresh, blur_val, blur_thresh, dims, mode):
+        outcome = "Non-plant image detected"
+        return {
+            "plant_scope": "hierarchical_4stage_pipeline",
+            "outcome": outcome,
+            "status": "out_of_distribution",
+            "dinov2_plant_similarity": round(dino_sim, 4),
+            "dinov2_threshold": round(dino_thresh, 4),
+            "is_ood": True,
+            "plant_part": "non_plant",
+            "crop_species": "Unknown",
+            "top1_label": outcome,
+            "top1_label_kannada": "ಕೃಷಿಯೇತರ ವಸ್ತು (Non-Plant OOD)",
+            "top1_confidence": 0.0,
+            "entropy": 3.637,
+            "norm_entropy": 1.0,
+            "is_healthy": False,
+            "plant_type": "Unknown",
+            "affected_regions": "None",
+            "predictions": [],
+            "source_evidence": None,
+            "debug_info": {
+                "stage1_valid": False,
+                "stage2_plant_part": "non_plant",
+                "is_ood": True,
+                "outcome": outcome,
+            },
+        }
+
     def _build_unknown_crop_response(self, crop, part, dino_sim, dino_thresh, blur_val, blur_thresh, dims, mode):
-        msg = "Valid plant image detected. Disease diagnosis is not available yet for this crop/plant part."
+        outcome = "Plant image detected, but unsupported crop/viewpoint"
+        msg = "Plant image detected, but unsupported crop/viewpoint. Disease diagnosis is not available yet for this crop/plant part."
+        decision_rule = "RULE_STAGE4_UNKNOWN_CROP"
         debug_info = {
             "stage1_valid": True,
             "stage2_plant_part": part.value,
@@ -987,11 +1337,20 @@ class HierarchicalVisionPipeline:
             "top1_confidence_pct": 0.0,
             "top_probabilities": [],
             "top3_probabilities": [],
-            "decision_rule": "RULE_STAGE4_UNKNOWN_CROP",
+            "top5_probabilities": [],
+            "decision_rule": decision_rule,
+            "final_decision_reason": decision_rule,
             "final_decision": "UNSUPPORTED_CROP_PART",
+            "model_path": "None",
+            "crop_route": crop,
+            "viewpoint_route": part.value,
+            "confidence_threshold": 0.60,
+            "agreement_score": 0.0,
+            "outcome": outcome,
         }
         return {
             "plant_scope": "hierarchical_4stage_pipeline",
+            "outcome": outcome,
             "status": "unsupported_crop_part",
             "dinov2_plant_similarity": round(dino_sim, 4),
             "dinov2_threshold": round(dino_thresh, 4),

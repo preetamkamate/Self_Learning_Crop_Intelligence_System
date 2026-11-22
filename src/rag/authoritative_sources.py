@@ -448,6 +448,13 @@ AUTHORITATIVE_SOURCES_REGISTRY: Dict[str, Dict[str, str]] = {
         "access_date": "November 2026",
         "supported_recommendations": "Vigorous, upright healthy tomato crop canopy without vascular wilt or stunting.",
     },
+    "Tomato Heat and Drought Stress": {
+        "source_title": "ICAR-IIHR Advisory: Abiotic Heat and Drought Stress Management in Solanaceous Crops",
+        "organization": "ICAR - Indian Institute of Horticultural Research, Bengaluru",
+        "url": "https://iihr.res.in",
+        "access_date": "November 2026",
+        "supported_recommendations": "Provide drip irrigation during morning hours; apply straw mulching (5 cm thickness) to conserve soil moisture; foliar spray of Kaolin 5% or Potassium Nitrate 1% to reduce transpiration stress; zero chemical fungicide required.",
+    },
     "Corn Stunt Disease": {
         "source_title": "ICAR-IIMR Protocol: Spiroplasma Stunt & Dalbulus Leafhopper Control",
         "organization": "ICAR - Indian Institute of Maize Research, Ludhiana",
@@ -461,6 +468,20 @@ AUTHORITATIVE_SOURCES_REGISTRY: Dict[str, Dict[str, str]] = {
         "url": "https://iimr.icar.gov.in",
         "access_date": "November 2026",
         "supported_recommendations": "Normal healthy maize crop canopy with vigorous vegetative growth.",
+    },
+    "Corn Fall Armyworm Damage": {
+        "source_title": "ICAR-IIMR Protocol: Integrated Management of Fall Armyworm (Spodoptera frugiperda) in Maize",
+        "organization": "ICAR - Indian Institute of Maize Research (IIMR), Ludhiana",
+        "url": "https://iimr.icar.gov.in",
+        "access_date": "November 2026",
+        "supported_recommendations": "Handpick and destroy egg masses; apply neem cake in soil @ 200 kg/ha; install pheromone traps @ 5/acre; at 5-10% whorl damage apply Bacillus thuringiensis (Bt) kurstaki @ 2 g/L or Chlorantraniliprole 18.5% SC @ 0.4 ml/L targeted directly into plant whorls.",
+    },
+    "Corn Nitrogen Deficiency Chlorosis": {
+        "source_title": "ICAR-IIMR & UAS Bangalore Nutrient Diagnostic Protocol: Maize Nutritional Disorders",
+        "organization": "ICAR-IIMR & University of Agricultural Sciences, Bengaluru",
+        "url": "https://iimr.icar.gov.in",
+        "access_date": "November 2026",
+        "supported_recommendations": "Characteristic inverted V-shaped chlorosis on lower leaves. Split application of Urea (top-dress 30-40 kg N/ha at knee-high and tasseling stages) or 2% Urea foliar spray; verify with soil testing before additional chemical fertilizer application.",
     },
     "Tomato Canopy Early Blight Outbreak": {
         "source_title": "TNAU & UAS Bangalore: Field Canopy Disease Scouting and Outbreak Control",
