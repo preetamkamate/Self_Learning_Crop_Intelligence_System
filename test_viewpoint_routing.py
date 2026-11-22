@@ -69,36 +69,37 @@ def test_non_leaf_views_safe_abstention():
         PlantPart.UNKNOWN,
     ]
 
-    expected_msg = "Valid plant image detected, but diagnosis for this crop and image type is not trained yet."
+    expected_msg = "Plant image detected, but this crop/viewpoint diagnosis is not supported yet."
 
     for part in non_leaf_parts:
-        with patch.object(HierarchicalVisionPipeline, "_load_plant_part_model", return_value=(None, [])):
-            with patch.object(HierarchicalVisionPipeline, "_build_reference_embeddings", return_value=None):
-                with patch.object(HierarchicalVisionPipeline, "_build_leaf_prototypes", return_value=None):
-                    with patch("src.vision.hierarchical_classifier.get_vision_models") as mock_models:
-                        mock_dinov2 = MagicMock()
-                        mock_dinov2.device = "cpu"
-                        mock_clf = MagicMock()
-                        mock_clf.id2label = {0: "Tomato___Early_blight"}
-                        mock_clf.label2id = {"Tomato___Early_blight": 0}
-                        mock_models.return_value = (mock_dinov2, mock_clf)
+        with patch.object(HierarchicalVisionPipeline, "_load_plant_part_model", return_value=(None, [])), \
+             patch.object(HierarchicalVisionPipeline, "_build_reference_embeddings", return_value=None), \
+             patch.object(HierarchicalVisionPipeline, "_build_leaf_prototypes", return_value=None), \
+             patch.object(HierarchicalVisionPipeline, "_get_multipart_model", return_value=None), \
+             patch("src.vision.hierarchical_classifier.get_vision_models") as mock_models:
+            mock_dinov2 = MagicMock()
+            mock_dinov2.device = "cpu"
+            mock_clf = MagicMock()
+            mock_clf.id2label = {0: "Tomato___Early_blight"}
+            mock_clf.label2id = {"Tomato___Early_blight": 0}
+            mock_models.return_value = (mock_dinov2, mock_clf)
 
-                        pipeline = HierarchicalVisionPipeline()
+            pipeline = HierarchicalVisionPipeline()
 
-                        dummy_img = MagicMock()
-                        dummy_img.size = (224, 224)
-                        dummy_img.mode = "RGB"
+            dummy_img = MagicMock()
+            dummy_img.size = (224, 224)
+            dummy_img.mode = "RGB"
 
-                        with patch.object(pipeline, "_check_stage1_image_validity", return_value=(True, True, 60.0, 0.95, MagicMock())):
-                            with patch.object(pipeline, "_identify_stage2_plant_part", return_value=part):
-                                with patch.object(pipeline, "_identify_stage3_crop_species", return_value=("Tomato", 0.90)):
-                                    result = pipeline.predict(dummy_img, user_crop_hint="Tomato", user_part_hint=part.value)
+            with patch.object(pipeline, "_check_stage1_image_validity", return_value=(True, True, 60.0, 0.95, MagicMock())):
+                with patch.object(pipeline, "_identify_stage2_plant_part", return_value=part):
+                    with patch.object(pipeline, "_identify_stage3_crop_species", return_value=("Tomato", 0.90)):
+                        result = pipeline.predict(dummy_img, user_crop_hint="Tomato", user_part_hint=part.value)
 
-                                    assert result["status"] == "unsupported_crop_part"
-                                    assert result["top1_label"] == expected_msg
-                                    assert result["predictions"] == []
-                                    assert result["source_evidence"] is None
-                                    assert result["is_ood"] is False
+                        assert result["status"] == "unsupported_crop_part"
+                        assert result["top1_label"] == expected_msg
+                        assert result["predictions"] == []
+                        assert result["source_evidence"] is None
+                        assert result["is_ood"] is False
 
 
 def test_non_plant_view_safe_rejection():

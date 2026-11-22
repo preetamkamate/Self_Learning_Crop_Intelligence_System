@@ -43,10 +43,27 @@ class WholePlantPredictionResult:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         # Compatibility fields for unified UI telemetry
+        selected_model = str(self.model_path if hasattr(self, "model_path") else DEFAULT_MODEL_PATH) if self.supported else "None"
+        fallback_reason = "" if self.supported else self.message
         data["top1_label"] = self.disease if self.supported and self.disease else self.message
         data["top1_confidence"] = round(self.confidence * 100, 2)
         data["plant_part"] = "whole_plant"
         data["crop_species"] = self.crop
+        data["disease"] = self.disease if self.supported else None
+        data["selected_model"] = selected_model
+        data["model_path"] = selected_model
+        data["fallback_reason"] = fallback_reason
+        data["predictions"] = [{"label": self.disease, "prob": round(self.confidence, 4)}] if (self.supported and self.disease) else []
+        data["source_evidence"] = None if not self.supported else data.get("source_evidence")
+        data["debug_info"] = {
+            "crop_route": self.crop,
+            "viewpoint_route": "whole_plant",
+            "selected_model": selected_model,
+            "model_path": selected_model,
+            "fallback_reason": fallback_reason,
+            "stage4_route_supported": self.supported,
+            "disease": data["disease"],
+        }
         return data
 
 

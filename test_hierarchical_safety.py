@@ -127,7 +127,7 @@ def test_zero_cross_crop_contamination():
     print(f"  Source Evidence: {res_wp['source_evidence']}")
 
     assert res_wp["status"] == "unsupported_crop_part"
-    assert "not trained yet" in res_wp["top1_label"].lower()
+    assert "not trained yet" in res_wp["top1_label"].lower() or "not supported yet" in res_wp["top1_label"].lower()
     assert len(res_wp["predictions"]) == 0, "Unsupported viewpoint must NOT list candidate diseases!"
     assert res_wp["source_evidence"] is None, "Unsupported viewpoint must NOT show disease management link!"
     print("  Whole-plant safe abstention: PASSED")
@@ -147,7 +147,11 @@ def test_zero_cross_crop_contamination():
         assert r["status"] == "unsupported_crop_part"
         assert len(r["predictions"]) == 0, f"Unsupported route {test_name} must NOT return candidates!"
         assert r["source_evidence"] is None, f"Unsupported route {test_name} must NOT return chemical links!"
-        assert "not trained yet" in r["top1_label"].lower() or "not yet supported" in r["top1_label"].lower()
+        assert (
+            "not trained yet" in r["top1_label"].lower()
+            or "not yet supported" in r["top1_label"].lower()
+            or "not supported yet" in r["top1_label"].lower()
+        )
     print("  Unsupported route safe abstention: PASSED")
 
     # 9. Blurry Image Test

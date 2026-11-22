@@ -307,8 +307,7 @@ def run_multipart_regression_tests():
         assert res["status"] == "unsupported_crop_part", f"Expected unsupported_crop_part for {case_name}"
         assert len(res["predictions"]) == 0, f"Unsupported route {case_name} returned non-empty candidates!"
         assert res["source_evidence"] is None, f"Unsupported route {case_name} returned source evidence!"
-        part_clean = part_h.replace("_", " ")
-        expected_msg = f"Valid {part_clean} image detected. Diagnosis is not yet supported for this crop and image type."
+        expected_msg = "Plant image detected, but this crop/viewpoint diagnosis is not supported yet."
         assert res["top1_label"] == expected_msg, f"Expected exact message '{expected_msg}', got '{res['top1_label']}'"
         passed += 1
         print(f"  -> {case_name} Safe Fallback: PASSED (Exact abstention message, 0 candidates, 0 links)")

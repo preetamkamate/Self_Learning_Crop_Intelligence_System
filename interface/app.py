@@ -340,9 +340,15 @@ for idx, msg in enumerate(st.session_state.messages):
                         dbg = vision.get("debug_info", {})
                         p_part = vision.get("plant_part", "leaf").replace("_", " ").title()
                         crop_sp = vision.get("crop_species", "Unknown")
+                        selected_model = dbg.get("selected_model", vision.get("selected_model", "None"))
+                        model_ckpt = dbg.get("model_path", vision.get("model_path", "None"))
+                        fallback_reason = dbg.get("fallback_reason", vision.get("fallback_reason", ""))
 
                         st.markdown(f"**Standard Outcome**: `{outcome}`")
-                        st.markdown(f"**Detected Viewpoint**: `🌿 {p_part}` | **Crop**: `{crop_sp}`")
+                        st.markdown(f"**Detected Viewpoint**: `🌿 {p_part}` | **Detected Crop**: `{crop_sp}`")
+                        st.markdown(f"**Selected Model Route**: `{selected_model}` | **Checkpoint**: `{model_ckpt}`")
+                        if fallback_reason:
+                            st.caption(f"**Exact Fallback Reason**: `{fallback_reason}`")
 
                         if status == "out_of_distribution":
                             st.markdown(
@@ -365,8 +371,9 @@ for idx, msg in enumerate(st.session_state.messages):
                                 f'<span class="metric-badge badge-ood">🛑 ROUTE UNSUPPORTED</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.info(f"ℹ️ **Valid {part_clean} image detected. Diagnosis is not yet supported for this crop and image type.**")
-                            st.caption(f"**Exact Abstention Reason**: {vision.get('refusal_reason_en', 'No held-out validated pathology model is deployed for this crop and viewpoint.')}")
+                            st.info(f"ℹ️ **{vision.get('top1_label', 'Plant image detected, but this crop/viewpoint diagnosis is not supported yet.')}**")
+                            st.caption(f"🛣️ **Model**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Viewpoint**: `{p_part}` | **Crop**: `{crop_sp}`")
+                            st.caption(f"**Exact Fallback Reason**: {fallback_reason or vision.get('refusal_reason_en', 'No held-out validated pathology model is deployed for this crop and viewpoint.')}")
                         elif status == "insufficient_evidence":
                             v_part = vision.get("plant_part", "plant part")
                             st.markdown(
@@ -376,13 +383,12 @@ for idx, msg in enumerate(st.session_state.messages):
                             st.caption(f"**Exact Abstention Reason**: {vision.get('refusal_reason_en', 'Ambiguous visual symptoms.')}")
                         elif status == "probable_diagnosis_needs_confirmation":
                             part_raw = vision.get("plant_part", "leaf")
-                            route_model = "MobileNetV2 Foliar Backbone" if part_raw == "leaf" else f"models/vision/{part_raw}_classifier.pt"
                             st.markdown(
                                 f'<span class="metric-badge badge-module">🔬 PROBABLE DIAGNOSIS (NEEDS CONFIRMATION)</span>'
                                 f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{p_part}`")
+                            st.caption(f"🛣️ **Diagnostic Route**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Organ**: `{p_part}`")
                             st.write(f"**Top Candidate**: {vision.get('top1_label')}")
                             st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}` (Norm: `{norm_entropy:.3f}`)")
                             st.write(f"**Affected Region**: 📍 *{aff_reg}*")
@@ -405,13 +411,12 @@ for idx, msg in enumerate(st.session_state.messages):
                                 else:
                                     st.info("Diagnosis not supported yet")
                             else:
-                                route_model = "MobileNetV2 Foliar Backbone"
                                 st.markdown(
                                     f'<span class="metric-badge badge-confident">✅ VALIDATED PROBABLE DIAGNOSIS</span>'
                                     f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
                                     unsafe_allow_html=True,
                                 )
-                                st.caption(f"🛣️ **Diagnostic Route**: `{route_model}` | **Organ**: `{p_part}`")
+                                st.caption(f"🛣️ **Diagnostic Route**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Organ**: `{p_part}`")
                                 st.write(f"**Top Condition**: {vision.get('top1_label')}")
                                 st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
                                 st.write(f"**Affected Region**: 📍 *{aff_reg}*")
