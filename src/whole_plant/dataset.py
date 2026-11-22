@@ -33,38 +33,50 @@ SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 @dataclass
 class WholePlantRecord:
-    """Represents a single full-plant / field image record with local metadata."""
+    """Represents a single full-plant / field image record with required local metadata."""
     crop: str
     image_path: str
-    status: str  # 'healthy', 'disease', 'nutrient_deficiency', 'abiotic_stress', 'pest', 'non_plant', 'unknown'
+    health_status: str = "unknown"
     disease_label: Optional[str] = None
-    disease: Optional[str] = None
     viewpoint: str = "whole_plant"
+    disease: Optional[str] = None
+    status: Optional[str] = None
     local_source_metadata: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        # Synchronize health_status and status for full compatibility
+        if not self.health_status or self.health_status == "unknown":
+            if self.status:
+                self.health_status = self.status
+        if not self.status:
+            self.status = self.health_status
+        if not self.disease and self.disease_label:
+            self.disease = self.disease_label
+        elif not self.disease_label and self.disease:
+            self.disease_label = self.disease
         if not self.local_source_metadata and self.metadata:
             self.local_source_metadata = dict(self.metadata)
         elif not self.metadata and self.local_source_metadata:
             self.metadata = dict(self.local_source_metadata)
-        if not self.disease and self.disease_label and self.status == "disease":
-            if "healthy" not in self.disease_label.lower() and "non-plant" not in self.disease_label.lower():
-                self.disease = self.disease_label
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WholePlantRecord":
+        h_status = data.get("health_status") or data.get("status", "unknown")
+        d_label = data.get("disease_label") or data.get("disease")
         return cls(
             crop=data.get("crop", "Unknown"),
             image_path=str(data.get("image_path", "")),
-            status=data.get("status", "unknown"),
-            disease_label=data.get("disease_label") or data.get("disease"),
-            disease=data.get("disease") or data.get("disease_label"),
+            health_status=h_status,
+            disease_label=d_label,
+            disease=d_label,
+            status=h_status,
             viewpoint=data.get("viewpoint", "whole_plant"),
             local_source_metadata=data.get("local_source_metadata", data.get("metadata", {})),
+            metadata=data.get("metadata", data.get("local_source_metadata", {})),
         )
 
 
@@ -101,11 +113,11 @@ def load_split(raw_dir: Union[str, Path] = RAW_WHOLE_PLANT_DIR, split: str = "tr
                 rec = WholePlantRecord(
                     crop=item.get("crop", "Unknown"),
                     image_path=str(resolved),
-                    status=item.get("status", "unknown"),
+                    health_status=item.get("health_status") or item.get("status", "unknown"),
                     disease_label=item.get("disease_label") or item.get("disease"),
-                    disease=item.get("disease") or item.get("disease_label"),
                     viewpoint=item.get("viewpoint", "whole_plant"),
                     local_source_metadata=item.get("local_source_metadata", item.get("metadata", {})),
+                    metadata=item.get("metadata", item.get("local_source_metadata", {})),
                 )
                 records.append(rec)
             return records

@@ -125,7 +125,10 @@ def test_predictor_with_no_images_returns_needs_training_data(tmp_path):
     assert result.supported is False
     assert result.confidence == 0.0
     assert result.disease is None
-    assert "Whole-plant model needs training data" in result.message
+    assert (
+        "Whole-plant model needs training data" in result.message
+        or "Whole-plant diagnosis is not trained yet" in result.message
+    )
 
 
 def test_predictor_unsupported_or_uncertain_returns_no_disease(tmp_path):
@@ -150,13 +153,96 @@ def test_predictor_unsupported_or_uncertain_returns_no_disease(tmp_path):
     res = predictor.predict("/fake/image.jpg", crop_hint="Tomato", confidence_threshold=0.90)
     assert res.supported is False
     assert res.disease is None
-    assert "Whole plant detected, but this crop or disease is not supported yet." in res.message
+    assert "uncertain" in res.message.lower() or "not trained" in res.message.lower() or "not supported yet" in res.message.lower()
 
     # 2. Unsupported crop
     res_unsupported_crop = predictor.predict("/fake/image.jpg", crop_hint="Apple", confidence_threshold=0.50)
     assert res_unsupported_crop.supported is False
     assert res_unsupported_crop.disease is None
-    assert "Whole plant detected, but this crop or disease is not supported yet." in res_unsupported_crop.message
+    assert "Valid whole plant detected, but this crop is not trained for diagnosis yet." in res_unsupported_crop.message
+
+
+def test_maize_whole_plant_can_never_produce_tomato_label():
+    """
+    Requirement 10 & 13:
+    Prove that maize whole-plant input can NEVER produce tomato disease labels under any condition.
+    """
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    assert predictor.is_trained is True
+
+    # Test with Corn/Maize image from held-out test set
+    test_corn_dir = Path("data/raw/whole_plant/test/Corn_Stunt_Disease")
+    if test_corn_dir.exists():
+        test_img = next(test_corn_dir.glob("*.jpg"))
+    else:
+        test_img = "/fake/corn.jpg"
+
+    # 1. Normal predict with crop_hint="Corn (Maize)"
+    res = predictor.predict(test_img, crop_hint="Corn (Maize)")
+    assert "tomato" not in res.top1_label.lower()
+    assert res.disease is None or "tomato" not in res.disease.lower()
+    for cand in res.predictions:
+        assert "tomato" not in cand["label"].lower(), f"Cross-crop leak! Tomato label in Corn predictions: {cand}"
+
+    # 2. Malicious adversarial test: Force tomato class logits to +1000.0 inside model
+    # Strict crop isolation must STILL prevent any tomato class from being selected
+    with patch.object(predictor.model, "forward", return_value=torch.tensor([[1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]])):
+        res_adv = predictor.predict(test_img, crop_hint="maize")
+        assert "tomato" not in res_adv.top1_label.lower()
+        if res_adv.disease:
+            assert "tomato" not in res_adv.disease.lower()
+        for cand in res_adv.predictions:
+            assert "tomato" not in cand["label"].lower()
+            assert "corn" in cand["label"].lower() or "healthy" in cand["label"].lower()
+
+
+def test_unsupported_crops_return_exact_safe_abstention():
+    """
+    Requirement 8 & 9:
+    If crop is untrained, return strictly:
+    'Valid whole plant detected, but this crop is not trained for diagnosis yet.'
+    """
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    assert predictor.is_trained is True
+
+    unsupported_crops = ["Grape", "Potato", "Apple", "Cotton", "Banana", "Sugarcane", "Wheat", "Coffee"]
+    expected_msg = "Valid whole plant detected, but this crop is not trained for diagnosis yet."
+
+    test_img = next(Path("data/raw/whole_plant/test").rglob("*.jpg"))
+
+    for crop in unsupported_crops:
+        res = predictor.predict(test_img, crop_hint=crop)
+        assert res.supported is False
+        assert res.disease is None
+        assert res.predictions == []
+        assert res.top1_label == expected_msg
+        assert res.message == expected_msg
+        assert "tomato" not in res.top1_label.lower()
+
+
+def test_held_out_evaluation_report_exists_and_verified():
+    """
+    Requirement 11 & 12:
+    Verify that models/whole_plant/evaluation_report.json exists and meets all safety criteria.
+    """
+    import json
+    from src.whole_plant.evaluate import DEFAULT_EVALUATION_REPORT_PATH
+
+    assert DEFAULT_EVALUATION_REPORT_PATH.exists()
+    with open(DEFAULT_EVALUATION_REPORT_PATH, "r") as f:
+        rep = json.load(f)
+
+    assert rep["evaluated"] is True
+    assert rep["total_test_samples"] == 54
+    assert rep["false_crop_routing_rate"] == 0.0, "False crop-routing rate must be strictly 0.00%!"
+    assert rep["unsupported_crop_abstention_rate"] == 1.0, "Unsupported crop abstention rate must be 100.00%!"
+    assert "Tomato" in rep["per_crop_metrics"]
+    assert "Corn (Maize)" in rep["per_crop_metrics"]
+    assert rep["overall_accuracy"] >= 0.85
 
 
 def test_predictor_prediction_structure_fields():

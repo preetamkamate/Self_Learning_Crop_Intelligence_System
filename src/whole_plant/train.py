@@ -60,7 +60,7 @@ class WholePlantModel(nn.Module):
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(64 * 4 * 4, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
             nn.Linear(hidden_dim, num_classes),
@@ -178,14 +178,24 @@ def train_whole_plant_model(
     # Save checkpoint
     out_file = Path(output_model_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
+    clean_supported_crops = sorted([c for c in crop_disease_map.keys() if c not in ["None", "Unknown", "none", "unknown"]])
+    clean_supported_diseases = sorted(list({
+        d for c, d_list in crop_disease_map.items()
+        if c in clean_supported_crops
+        for d in d_list
+        if "healthy" not in d.lower() and "non-plant" not in d.lower() and "unknown" not in d.lower()
+    }))
+
     checkpoint = {
         "model_state": model.state_dict(),
         "num_classes": len(unique_labels),
+        "classes": unique_labels,
         "label_to_idx": label_to_idx,
         "idx_to_label": idx_to_label,
         "crop_disease_map": crop_disease_map,
-        "supported_crops": sorted(list(crop_disease_map.keys())),
-        "supported_diseases": sorted(list({d for d_list in crop_disease_map.values() for d in d_list})),
+        "supported_crops": clean_supported_crops,
+        "supported_diseases": clean_supported_diseases,
+        "val_accuracy": val_acc,
     }
     torch.save(checkpoint, out_file)
     logging.info("Saved trained whole-plant model to: %s (Val Acc: %.2f%%)", out_file, val_acc * 100)

@@ -350,76 +350,40 @@ for idx, msg in enumerate(st.session_state.messages):
                         if fallback_reason:
                             st.caption(f"**Exact Fallback Reason**: `{fallback_reason}`")
 
-                        if status == "out_of_distribution":
+                        # Check if Whole-Plant model and held-out evaluation report exist (Requirement 12)
+                        wp_ckpt_path = ROOT_DIR / "models" / "whole_plant" / "model.pt"
+                        wp_eval_path = ROOT_DIR / "models" / "whole_plant" / "evaluation_report.json"
+                        is_whole_plant_deployed = wp_ckpt_path.exists() and wp_eval_path.exists()
+
+                        if not is_whole_plant_deployed:
+                            st.info("Whole-plant diagnosis is not trained yet. Add approved labeled whole-plant images before diagnosis.")
+                        elif status == "out_of_distribution":
                             st.markdown(
-                                f'<span class="metric-badge badge-ood">🚫 NON-PLANT OOD (DINOv2={dino_sim:.3f} < {dino_thresh:.2f})</span>',
+                                f'<span class="metric-badge badge-ood">🚫 NON-PLANT OOD</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption(f"**Abstention Reason**: {vision.get('refusal_reason_en', 'Non-plant image detected.')}")
-                        elif status == "insufficient_image_quality":
-                            b_val = dbg.get("blur_metric", 0.0)
-                            b_thresh = dbg.get("blur_threshold", 40.0)
-                            st.markdown(
-                                f'<span class="metric-badge badge-ood">🔍 BLURRED / LOW FOCUS (Sharpness={b_val:.1f} < {b_thresh:.1f})</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.caption(f"**Abstention Reason**: {vision.get('refusal_reason_en', 'Image blurred.')}")
-                        elif status == "unsupported_crop_part":
-                            part_clean = vision.get("plant_part", "plant part").replace("_", " ")
-                            st.markdown(
-                                f'<span class="metric-badge badge-module">🌿 VALID PLANT ({crop_sp} — {p_part})</span>'
-                                f'<span class="metric-badge badge-ood">🛑 ROUTE UNSUPPORTED</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.info(f"ℹ️ **{vision.get('top1_label', 'Plant image detected, but this crop/viewpoint diagnosis is not supported yet.')}**")
+                            st.caption(f"**Abstention Reason**: {vision.get('fallback_reason', 'Non-plant image detected.')}")
+                        elif status in ["unsupported", "unsupported_crop_part", "whole_plant_unsupported"] or not vision.get("supported", False):
+                            st.info(f"ℹ️ **{vision.get('top1_label', 'Valid whole plant detected, but this crop is not trained for diagnosis yet.')}**")
                             st.caption(f"🛣️ **Model**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Viewpoint**: `{p_part}` | **Crop**: `{crop_sp}`")
-                            st.caption(f"**Exact Fallback Reason**: {fallback_reason or vision.get('refusal_reason_en', 'No held-out validated pathology model is deployed for this crop and viewpoint.')}")
-                        elif status == "insufficient_evidence":
-                            v_part = vision.get("plant_part", "plant part")
+                            st.caption(f"**Exact Fallback Reason**: {fallback_reason or 'This crop or condition was absent from whole-plant training data.'}")
+                        elif status in ["needs_training_data", "whole_plant_not_trained"]:
+                            st.info("Whole-plant diagnosis is not trained yet. Add approved labeled whole-plant images before diagnosis.")
+                        elif status in ["uncertain_disease", "uncertain"]:
                             st.markdown(
-                                f'<span class="metric-badge badge-ood">⚠️ INSUFFICIENT VISUAL EVIDENCE ({v_part.upper()})</span>',
+                                f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS</span>',
                                 unsafe_allow_html=True,
                             )
-                            st.caption(f"**Exact Abstention Reason**: {vision.get('refusal_reason_en', 'Ambiguous visual symptoms.')}")
-                        elif status == "probable_diagnosis_needs_confirmation":
-                            part_raw = vision.get("plant_part", "leaf")
+                            st.caption(f"Top Candidate: {vision.get('top1_label')} ({vision.get('top1_confidence')}%) — confirmation advised.")
+                        else:
                             st.markdown(
-                                f'<span class="metric-badge badge-module">🔬 PROBABLE DIAGNOSIS (NEEDS CONFIRMATION)</span>'
-                                f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
+                                f'<span class="metric-badge badge-confident">✅ VALIDATED WHOLE-PLANT DIAGNOSIS</span>'
+                                f'<span class="metric-badge badge-confident">✅ HELD-OUT TEST VERIFIED</span>',
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"🛣️ **Diagnostic Route**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Organ**: `{p_part}`")
-                            st.write(f"**Top Candidate**: {vision.get('top1_label')}")
-                            st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}` (Norm: `{norm_entropy:.3f}`)")
-                            st.write(f"**Affected Region**: 📍 *{aff_reg}*")
-                            st.caption("⚠️ Symptoms observed with quadrant variation. Physical confirmation advised before spraying.")
-                        elif status in ["needs_training_data", "whole_plant_not_trained"]:
-                            st.info("Whole-plant diagnosis is not trained yet")
-                        elif status == "whole_plant_unsupported":
-                            st.info("Whole plant detected, but this crop or disease is not supported yet.")
-                        elif status in ["uncertain_disease", "uncertain"]:
-                            st.markdown(
-                                f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS (H={entropy:.3f})</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.caption(f"Conflict across regions. Top1: {vision.get('top1_label')} ({vision.get('top1_confidence')}%)")
-                        else:
-                            part_raw = vision.get("plant_part", "leaf")
-                            if str(part_raw).lower() != "leaf":
-                                if str(part_raw).lower() == "whole_plant" or "whole plant" in p_part.lower():
-                                    st.info("Whole-plant diagnosis is not trained yet")
-                                else:
-                                    st.info("Diagnosis not supported yet")
-                            else:
-                                st.markdown(
-                                    f'<span class="metric-badge badge-confident">✅ VALIDATED PROBABLE DIAGNOSIS</span>'
-                                    f'<span class="metric-badge badge-confident">✅ DEPLOYED ROUTE</span>',
-                                    unsafe_allow_html=True,
-                                )
-                                st.caption(f"🛣️ **Diagnostic Route**: `{selected_model}` | **Checkpoint**: `{model_ckpt}` | **Organ**: `{p_part}`")
-                                st.write(f"**Top Condition**: {vision.get('top1_label')}")
-                                st.write(f"**Confidence**: {vision.get('top1_confidence')}% | **Entropy**: `{entropy:.3f}`")
-                                st.write(f"**Affected Region**: 📍 *{aff_reg}*")
+                            st.write(f"**Top Condition**: {vision.get('top1_label')}")
+                            st.write(f"**Confidence**: {vision.get('top1_confidence')}%")
 
                         # Hierarchical Diagnosis Card
                         hierarchical = vision.get("hierarchical_diagnosis")
