@@ -19,7 +19,7 @@ from src.orchestrator.state import SessionState
 from src.orchestrator.weather import WeatherService
 from src.rag.retriever import get_retriever
 from src.tabular.predict import CropPredictor
-from src.whole_plant.predict import WholePlantPredictor
+from src.whole_plant.router import WholePlantRouter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -30,7 +30,8 @@ class AutonomousRouter:
     def __init__(self):
         logging.info("Initializing AutonomousRouter modules...")
         self.tabular_predictor = CropPredictor()
-        self.whole_plant_predictor = WholePlantPredictor()
+        self.whole_plant_router = WholePlantRouter()
+        self.whole_plant_predictor = self.whole_plant_router.predictor
         self.retriever = get_retriever()
         self.weather_service = WeatherService()
 
@@ -170,11 +171,17 @@ class AutonomousRouter:
         # Requirement 1: Stop using the current leaf/foliar model for app diagnoses.
         # Requirement 3: Build a new independent model for full-plant and field photos only.
         if has_new_image:
-            logging.info("AutonomousRouter: Routing image strictly to new Whole-Plant Model Pipeline...")
+            logging.info("AutonomousRouter: Routing image strictly to new Whole-Plant Router Pipeline...")
             modules_run.append("Whole-Plant Photo Analysis (Independent Model)")
-            wp_res = self.whole_plant_predictor.predict(
+            detected_crop_hint = kwargs.get("crop_hint", getattr(state.profile, "active_crop", None))
+            if not detected_crop_hint or detected_crop_hint in ["Unknown", "Auto-detect", None]:
+                if "tomato" in text_lower:
+                    detected_crop_hint = "Tomato"
+                elif "corn" in text_lower or "maize" in text_lower:
+                    detected_crop_hint = "Corn (Maize)"
+            wp_res = self.whole_plant_router.route(
                 image_input,
-                crop_hint=kwargs.get("crop_hint", getattr(state.profile, "active_crop", None)),
+                crop_hint=detected_crop_hint,
                 viewpoint_hint=kwargs.get("part_hint", None),
             )
             vision_result = wp_res.to_dict()

@@ -3,10 +3,14 @@ Whole-Plant Disease Model Training Engine.
 Trains directly from local folders:
 - data/raw/whole_plant/train/
 - data/raw/whole_plant/val/
-Saves a whole-plant checkpoint locally to models/whole_plant/model.pt.
+Saves artifacts:
+- models/whole_plant/model.pt
+- models/whole_plant/labels.json
+- models/whole_plant/training_report.json
 Never modifies, uses, or interacts with the leaf pathology model.
 """
 import argparse
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -37,6 +41,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 DEFAULT_MODEL_DIR = ROOT_DIR / "models" / "whole_plant"
 DEFAULT_MODEL_PATH = DEFAULT_MODEL_DIR / "model.pt"
+DEFAULT_LABELS_PATH = DEFAULT_MODEL_DIR / "labels.json"
+DEFAULT_TRAINING_REPORT_PATH = DEFAULT_MODEL_DIR / "training_report.json"
 
 
 class WholePlantModel(nn.Module):
@@ -75,6 +81,8 @@ def train_whole_plant_model(
     raw_dir: Union[str, Path] = RAW_WHOLE_PLANT_DIR,
     processed_dir: Union[str, Path] = PROCESSED_WHOLE_PLANT_DIR,
     output_model_path: Union[str, Path] = DEFAULT_MODEL_PATH,
+    output_labels_path: Union[str, Path] = DEFAULT_LABELS_PATH,
+    output_report_path: Union[str, Path] = DEFAULT_TRAINING_REPORT_PATH,
     epochs: int = 10,
     batch_size: int = 16,
     lr: float = 1e-3,
@@ -82,39 +90,43 @@ def train_whole_plant_model(
 ) -> Dict[str, Any]:
     """
     Train a separate whole-plant model from local dataset folders.
-    If no images exist in raw_dir, safely aborts and returns 'needs_training_data'.
+    If no images exist or metadata is invalid, safely aborts and returns 'needs_training_data'.
     """
     raw_path = Path(raw_dir)
-    if not has_training_images(raw_path):
-        logging.warning("Cannot train whole-plant model: %s has no images.", raw_path)
+    all_records, dataset_summary = load_raw_dataset(raw_path)
+
+    if not all_records or dataset_summary.get("status") != "success":
+        logging.warning("Cannot train whole-plant model: %s has insufficient valid labeled images.", raw_path)
         return {
             "status": "needs_training_data",
             "message": "Whole-plant model needs training data",
             "trained": False,
+            "exact_image_counts": dataset_summary.get("count", 0),
+            "crops": dataset_summary.get("crop_counts", {}),
+            "viewpoints": dataset_summary.get("viewpoint_counts", {}),
+            "labels": dataset_summary.get("label_counts", {}),
+            "missing_metadata": dataset_summary.get("total_rejected", 0),
         }
 
     # If train/ and val/ folders exist in raw_path, use them directly
     if (raw_path / "train").exists():
         train_records = load_split(raw_path, "train")
         val_records = load_split(raw_path, "val") or train_records
-        all_records = train_records + val_records + load_split(raw_path, "test")
     else:
-        all_records, _ = load_raw_dataset(raw_path)
-        if not all_records:
-            return {
-                "status": "needs_training_data",
-                "message": "Whole-plant model needs training data",
-                "trained": False,
-            }
         splits = create_splits(all_records, output_dir=processed_dir)
         train_records = splits["train"]
         val_records = splits["val"] or splits["train"]
 
-    if not train_records:
+    if not train_records or len(train_records) < 5:
         return {
             "status": "needs_training_data",
-            "message": "Whole-plant model needs training data",
+            "message": "Not enough valid training records to train whole-plant model",
             "trained": False,
+            "exact_image_counts": len(train_records),
+            "crops": dataset_summary.get("crop_counts", {}),
+            "viewpoints": dataset_summary.get("viewpoint_counts", {}),
+            "labels": dataset_summary.get("label_counts", {}),
+            "missing_metadata": dataset_summary.get("total_rejected", 0),
         }
 
     # Build unique labels and crop-disease mappings
@@ -148,6 +160,7 @@ def train_whole_plant_model(
 
     logging.info("Training WholePlantModel for %d epochs on device: %s", epochs, target_device)
     model.train()
+    history = []
     for ep in range(epochs):
         total_loss = 0.0
         for imgs, targets, _ in train_loader:
@@ -159,6 +172,7 @@ def train_whole_plant_model(
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+        history.append({"epoch": ep + 1, "loss": round(total_loss / len(train_loader), 4)})
 
     # Validation evaluation
     model.eval()
@@ -175,7 +189,7 @@ def train_whole_plant_model(
 
     val_acc = (correct / total) if total > 0 else 0.0
 
-    # Save checkpoint
+    # Save artifacts
     out_file = Path(output_model_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     clean_supported_crops = sorted([c for c in crop_disease_map.keys() if c not in ["None", "Unknown", "none", "unknown"]])
@@ -200,21 +214,59 @@ def train_whole_plant_model(
     torch.save(checkpoint, out_file)
     logging.info("Saved trained whole-plant model to: %s (Val Acc: %.2f%%)", out_file, val_acc * 100)
 
-    return {
+    # Save labels.json
+    labels_file = Path(output_labels_path)
+    labels_content = {
+        "classes": unique_labels,
+        "label_to_idx": label_to_idx,
+        "idx_to_label": {str(k): v for k, v in idx_to_label.items()},
+        "crop_disease_map": crop_disease_map,
+        "supported_crops": clean_supported_crops,
+        "supported_diseases": clean_supported_diseases,
+    }
+    with open(labels_file, "w", encoding="utf-8") as f:
+        json.dump(labels_content, f, indent=2)
+    logging.info("Saved whole-plant labels to: %s", labels_file)
+
+    # Save training_report.json
+    report_file = Path(output_report_path)
+    training_report = {
         "status": "success",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "trained": True,
         "model_path": str(out_file),
-        "val_accuracy": val_acc,
+        "labels_path": str(labels_file),
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "learning_rate": lr,
+        "device": str(target_device),
+        "train_samples": len(train_records),
+        "val_samples": len(val_records),
+        "val_accuracy": round(val_acc, 4),
         "num_classes": len(unique_labels),
-        "supported_crops": checkpoint["supported_crops"],
-        "supported_diseases": checkpoint["supported_diseases"],
+        "supported_crops": clean_supported_crops,
+        "supported_diseases": clean_supported_diseases,
+        "training_history": history,
+        "dataset_summary": {
+            "total_records": len(all_records),
+            "crops": dataset_summary.get("crop_counts", {}),
+            "viewpoints": dataset_summary.get("viewpoint_counts", {}),
+            "labels": dataset_summary.get("label_counts", {}),
+        },
     }
+    with open(report_file, "w", encoding="utf-8") as f:
+        json.dump(training_report, f, indent=2)
+    logging.info("Saved training report to: %s", report_file)
+
+    return training_report
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train Whole-Plant Disease Model from Local Folders")
     parser.add_argument("--data-dir", type=str, default=str(RAW_WHOLE_PLANT_DIR), help="Path to data/raw/whole_plant")
     parser.add_argument("--output-model", type=str, default=str(DEFAULT_MODEL_PATH), help="Path to save model checkpoint")
+    parser.add_argument("--output-labels", type=str, default=str(DEFAULT_LABELS_PATH), help="Path to save labels json")
+    parser.add_argument("--output-report", type=str, default=str(DEFAULT_TRAINING_REPORT_PATH), help="Path to save training report")
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
@@ -223,6 +275,8 @@ def main():
     result = train_whole_plant_model(
         raw_dir=args.data_dir,
         output_model_path=args.output_model,
+        output_labels_path=args.output_labels,
+        output_report_path=args.output_report,
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,

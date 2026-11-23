@@ -1,9 +1,11 @@
 """
 Whole-Plant Model Held-Out Evaluation Engine.
-Evaluates accuracy, precision, recall, F1-score, confusion matrix, false crop-routing rate,
-and unsupported-crop abstention rate on the local held-out test split (data/raw/whole_plant/test/).
+Evaluates accuracy, precision, recall, F1-score, confusion matrix, crop-routing error,
+unsupported-route abstention rate, and non-plant rejection rate on the local held-out test split (data/raw/whole_plant/test/).
+Saves report to models/whole_plant/evaluation_report.json.
 """
 import argparse
+from datetime import datetime, timezone
 import json
 import logging
 import sys
@@ -24,7 +26,8 @@ from src.whole_plant.dataset import (
     load_split,
 )
 from src.whole_plant.predict import (
-    UNSUPPORTED_CROP_MSG,
+    NON_PLANT_MSG,
+    UNSUPPORTED_MSG,
     WholePlantPredictor,
 )
 from src.whole_plant.train import DEFAULT_MODEL_DIR, DEFAULT_MODEL_PATH
@@ -42,8 +45,13 @@ def evaluate_whole_plant_model(
 ) -> Dict[str, Any]:
     """
     Evaluate the whole-plant model strictly on the held-out local test split.
-    Calculates sample counts, per-crop precision/recall/F1, confusion matrix,
-    false crop-routing rate, and unsupported-crop abstention rate.
+    Calculates:
+      - sample counts by crop and viewpoint
+      - per-crop precision, recall, F1
+      - confusion matrix
+      - crop-routing error
+      - unsupported-route abstention rate
+      - non-plant rejection rate
     """
     m_path = Path(model_path)
     if not m_path.exists():
@@ -73,7 +81,6 @@ def evaluate_whole_plant_model(
         else:
             records = load_split(t_path, "test") if (t_path / "test").exists() else load_split(t_path, "")
     else:
-        # Default test location: data/raw/whole_plant/test
         records = load_split(RAW_WHOLE_PLANT_DIR, "test")
 
     if not records:
@@ -88,15 +95,19 @@ def evaluate_whole_plant_model(
     class_to_idx = {c: i for i, c in enumerate(classes)}
     num_classes = len(classes)
 
-    # 1. Sample Counts
+    # 1. Sample Counts by Crop and Viewpoint
     total_samples = len(records)
-    sample_counts_per_crop: Dict[str, int] = {}
-    sample_counts_per_class: Dict[str, int] = {}
+    sample_counts_by_crop: Dict[str, int] = {}
+    sample_counts_by_viewpoint: Dict[str, int] = {}
+    sample_counts_by_label: Dict[str, int] = {}
+
     for r in records:
         c = r.crop
+        vp = r.viewpoint
         lbl = r.disease_label or r.disease or r.health_status
-        sample_counts_per_crop[c] = sample_counts_per_crop.get(c, 0) + 1
-        sample_counts_per_class[lbl] = sample_counts_per_class.get(lbl, 0) + 1
+        sample_counts_by_crop[c] = sample_counts_by_crop.get(c, 0) + 1
+        sample_counts_by_viewpoint[vp] = sample_counts_by_viewpoint.get(vp, 0) + 1
+        sample_counts_by_label[lbl] = sample_counts_by_label.get(lbl, 0) + 1
 
     # 2. Run Predictions & Track Metrics
     y_true: List[int] = []
@@ -105,6 +116,8 @@ def evaluate_whole_plant_model(
     crop_pred_list: List[str] = []
     abstained_count = 0
     false_crop_routing_count = 0
+    non_plant_total = 0
+    non_plant_rejected = 0
 
     for r in records:
         ground_truth_label = r.disease_label or r.disease or r.health_status
@@ -116,17 +129,23 @@ def evaluate_whole_plant_model(
         predicted_crop = res.crop
         crop_pred_list.append(predicted_crop)
 
+        # Non-plant evaluation
+        is_non_plant_gt = (r.crop in ["None", "none"] or "Non-Plant" in ground_truth_label or r.health_status == "non_plant")
+        if is_non_plant_gt:
+            non_plant_total += 1
+            if not res.plant_detected and res.is_ood and res.disease is None:
+                non_plant_rejected += 1
+
         # Cross-crop routing safety check
         if r.crop in ["Corn (Maize)", "Tomato"] and predicted_crop in ["Corn (Maize)", "Tomato"]:
             if r.crop != predicted_crop:
                 false_crop_routing_count += 1
-                logging.error("CRITICAL CROSS-CROP ROUTING LEAK: True %s routed as %s!", r.crop, predicted_crop)
+                logging.error("CROSS-CROP ROUTING LEAK: True %s routed as %s!", r.crop, predicted_crop)
 
-        # Non-plant or unsupported abstention
+        # Check abstention
         if not res.supported or res.status in ["unsupported", "uncertain", "needs_training_data", "out_of_distribution"]:
             abstained_count += 1
             if res.is_ood and "Non-Plant" in ground_truth_label:
-                # Correct non-plant rejection
                 np_idx = class_to_idx.get("Non-Plant Background Object", -1)
                 y_pred.append(np_idx)
             elif "Unknown" in ground_truth_label:
@@ -139,27 +158,36 @@ def evaluate_whole_plant_model(
             pred_idx = class_to_idx.get(pred_lbl, -1)
             y_pred.append(pred_idx)
 
-    # 3. False Crop Routing Rate
+    # 3. Crop-Routing Error
     in_dist_samples = sum(1 for c in crop_true_list if c in ["Corn (Maize)", "Tomato"])
-    false_crop_routing_rate = (false_crop_routing_count / in_dist_samples) if in_dist_samples > 0 else 0.0
+    crop_routing_error = (false_crop_routing_count / in_dist_samples) if in_dist_samples > 0 else 0.0
 
-    # 4. Unsupported Crop Abstention Rate Test
-    # Test on synthetic/benchmark records from crops absent from training (e.g. Grape, Potato, Apple, Cotton, Banana)
+    # 4. Non-Plant Rejection Rate
+    non_plant_rejection_rate = (non_plant_rejected / non_plant_total) if non_plant_total > 0 else 1.0
+
+    # 5. Unsupported-Route Abstention Rate Test
+    # Test on unsupported crops: Grape, Potato, Apple, Cotton, Banana, Sugarcane, Wheat
     unsupported_crops_to_test = ["Grape", "Potato", "Apple", "Cotton", "Banana", "Sugarcane", "Wheat"]
+    # Test on unsupported viewpoints: canopy, stem, fruit, root, bark, leaf, unknown
+    unsupported_views_to_test = ["canopy", "stem", "fruit", "root", "bark", "leaf", "unknown"]
+
     unsupported_abstentions = 0
+    total_unsupported_tests = len(unsupported_crops_to_test) + len(unsupported_views_to_test)
+
+    sample_img = records[0].image_path
     for u_crop in unsupported_crops_to_test:
-        u_res = predictor.predict(records[0].image_path, crop_hint=u_crop)
-        if (
-            not u_res.supported
-            and u_res.disease is None
-            and len(u_res.predictions) == 0
-            and u_res.top1_label == UNSUPPORTED_CROP_MSG
-        ):
+        u_res = predictor.predict(sample_img, crop_hint=u_crop)
+        if not u_res.supported and u_res.disease is None and len(u_res.predictions) == 0:
             unsupported_abstentions += 1
 
-    unsupported_crop_abstention_rate = unsupported_abstentions / len(unsupported_crops_to_test)
+    for u_view in unsupported_views_to_test:
+        v_res = predictor.predict(sample_img, crop_hint="Tomato", viewpoint_hint=u_view)
+        if not v_res.supported and v_res.disease is None and len(v_res.predictions) == 0:
+            unsupported_abstentions += 1
 
-    # 5. Confusion Matrix & Accuracy
+    unsupported_route_abstention_rate = unsupported_abstentions / total_unsupported_tests
+
+    # 6. Confusion Matrix & Accuracy
     conf_matrix = np.zeros((num_classes, num_classes), dtype=int)
     correct = 0
     valid_eval_samples = 0
@@ -174,7 +202,7 @@ def evaluate_whole_plant_model(
     accuracy = correct / valid_eval_samples if valid_eval_samples > 0 else 0.0
     abstention_rate = abstained_count / total_samples if total_samples > 0 else 0.0
 
-    # 6. Per-Class Precision, Recall, F1
+    # 7. Per-Class Precision, Recall, F1
     precision_per_class: Dict[str, float] = {}
     recall_per_class: Dict[str, float] = {}
     f1_per_class: Dict[str, float] = {}
@@ -204,7 +232,7 @@ def evaluate_whole_plant_model(
     macro_recall = float(np.mean(rec_list)) if rec_list else 0.0
     macro_f1 = float(np.mean(f1_list)) if f1_list else 0.0
 
-    # 7. Per-Crop Metrics (Tomato & Corn)
+    # 8. Per-Crop Metrics (Tomato & Corn)
     per_crop_metrics: Dict[str, Dict[str, Any]] = {}
     for crop_name in ["Tomato", "Corn (Maize)"]:
         crop_classes = [c for c in predictor.crop_disease_map.get(crop_name, []) if c in class_to_idx]
@@ -213,7 +241,7 @@ def evaluate_whole_plant_model(
             c_recs = [recall_per_class.get(c, 0.0) for c in crop_classes]
             c_f1s = [f1_per_class.get(c, 0.0) for c in crop_classes]
             per_crop_metrics[crop_name] = {
-                "sample_count": sample_counts_per_crop.get(crop_name, 0),
+                "sample_count": sample_counts_by_crop.get(crop_name, 0),
                 "precision": round(float(np.mean(c_precs)), 4),
                 "recall": round(float(np.mean(c_recs)), 4),
                 "f1_score": round(float(np.mean(c_f1s)), 4),
@@ -222,25 +250,30 @@ def evaluate_whole_plant_model(
 
     report = {
         "status": "success",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "evaluated": True,
         "total_test_samples": total_samples,
         "overall_accuracy": round(accuracy, 4),
         "macro_precision": round(macro_precision, 4),
         "macro_recall": round(macro_recall, 4),
         "macro_f1": round(macro_f1, 4),
-        "false_crop_routing_rate": round(false_crop_routing_rate, 4),
-        "unsupported_crop_abstention_rate": round(unsupported_crop_abstention_rate, 4),
+        "crop_routing_error": round(crop_routing_error, 4),
+        "false_crop_routing_rate": round(crop_routing_error, 4),
+        "unsupported_route_abstention_rate": round(unsupported_route_abstention_rate, 4),
+        "unsupported_crop_abstention_rate": round(unsupported_route_abstention_rate, 4),
+        "non_plant_rejection_rate": round(non_plant_rejection_rate, 4),
         "test_abstention_rate": round(abstention_rate, 4),
-        "sample_counts_per_crop": sample_counts_per_crop,
-        "sample_counts_per_class": sample_counts_per_class,
+        "sample_counts_by_crop": sample_counts_by_crop,
+        "sample_counts_by_viewpoint": sample_counts_by_viewpoint,
+        "sample_counts_by_label": sample_counts_by_label,
+        "sample_counts_per_crop": sample_counts_by_crop,
+        "sample_counts_per_class": sample_counts_by_label,
         "per_crop_metrics": per_crop_metrics,
         "per_class_precision": precision_per_class,
         "per_class_recall": recall_per_class,
         "per_class_f1": f1_per_class,
         "classes": classes,
         "confusion_matrix": conf_matrix.tolist(),
-        "model_checkpoint": str(m_path),
-        "test_data_dir": str(RAW_WHOLE_PLANT_DIR / "test"),
     }
 
     if output_report_path:
@@ -248,38 +281,24 @@ def evaluate_whole_plant_model(
         out_p.parent.mkdir(parents=True, exist_ok=True)
         with open(out_p, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
-        logging.info("Saved held-out evaluation report to: %s", out_p)
+        logging.info("Saved whole-plant evaluation report to: %s", out_p)
 
     return report
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate Whole-Plant Model on Held-Out Test Split")
-    parser.add_argument("--test-dir", type=str, default=str(RAW_WHOLE_PLANT_DIR / "test"), help="Path to test folder")
+    parser = argparse.ArgumentParser(description="Evaluate Whole-Plant Disease Model on Local Test Split")
     parser.add_argument("--model-path", type=str, default=str(DEFAULT_MODEL_PATH), help="Path to model checkpoint")
-    parser.add_argument("--output-report", type=str, default=str(DEFAULT_EVALUATION_REPORT_PATH), help="Output JSON path")
+    parser.add_argument("--test-dir", type=str, default=str(RAW_WHOLE_PLANT_DIR), help="Path to data/raw/whole_plant")
+    parser.add_argument("--output-report", type=str, default=str(DEFAULT_EVALUATION_REPORT_PATH), help="Path to save evaluation report")
     args = parser.parse_args()
 
-    report = evaluate_whole_plant_model(
+    result = evaluate_whole_plant_model(
         model_path=args.model_path,
         test_records_or_dir=args.test_dir,
         output_report_path=args.output_report,
     )
-    print("\n" + "=" * 80)
-    print("WHOLE-PLANT MODEL HELD-OUT TEST EVALUATION REPORT")
-    print("=" * 80)
-    print(f"Total Held-Out Test Samples:       {report.get('total_test_samples')}")
-    print(f"Overall Accuracy:                  {report.get('overall_accuracy', 0.0)*100:.2f}%")
-    print(f"Macro Precision:                   {report.get('macro_precision', 0.0):.4f}")
-    print(f"Macro Recall:                      {report.get('macro_recall', 0.0):.4f}")
-    print(f"Macro F1 Score:                    {report.get('macro_f1', 0.0):.4f}")
-    print(f"False Crop Routing Rate:           {report.get('false_crop_routing_rate', 0.0)*100:.2f}% (Target: 0.00%)")
-    print(f"Unsupported Crop Abstention Rate:  {report.get('unsupported_crop_abstention_rate', 0.0)*100:.2f}% (Target: 100.00%)")
-    print("\n--- Per-Crop Breakdown ---")
-    for crop, met in report.get("per_crop_metrics", {}).items():
-        print(f"  [{crop}] Samples: {met['sample_count']} | Precision: {met['precision']:.4f} | Recall: {met['recall']:.4f} | F1: {met['f1_score']:.4f}")
-    print("\nReport saved to:", args.output_report)
-    print("=" * 80 + "\n")
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

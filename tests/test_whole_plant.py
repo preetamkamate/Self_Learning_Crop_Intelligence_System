@@ -246,23 +246,119 @@ def test_held_out_evaluation_report_exists_and_verified():
 
 
 def test_predictor_prediction_structure_fields():
-    """Verify WholePlantPredictionResult structure contains all required fields."""
+    """Verify WholePlantPredictionResult structure contains all 9 required fields."""
     res = WholePlantPredictionResult(
+        plant_detected=True,
         crop="Tomato",
-        status="disease",
-        confidence=0.88,
+        viewpoint="whole_plant",
         supported=True,
-        disease="Fusarium Wilt",
-        message="Whole-plant diagnosis: Fusarium Wilt",
+        disease="Tomato Fusarium Wilt",
+        confidence=0.88,
+        status="disease",
+        fallback_reason="",
+        checkpoint_path="models/whole_plant/model.pt",
     )
     d = res.to_dict()
-    assert "crop" in d
-    assert "status" in d
-    assert "confidence" in d
-    assert "supported" in d
-    assert "disease" in d
-    assert "message" in d
-    assert d["top1_label"] == "Fusarium Wilt"
+    assert "plant_detected" in d and d["plant_detected"] is True
+    assert "crop" in d and d["crop"] == "Tomato"
+    assert "viewpoint" in d and d["viewpoint"] == "whole_plant"
+    assert "supported" in d and d["supported"] is True
+    assert "disease" in d and d["disease"] == "Tomato Fusarium Wilt"
+    assert "confidence" in d and d["confidence"] == 0.88
+    assert "status" in d and d["status"] == "disease"
+    assert "fallback_reason" in d
+    assert "checkpoint_path" in d
+
+
+def test_tomato_cannot_return_grape_disease():
+    """Regression test proving tomato whole-plant input cannot return grape disease."""
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    assert predictor.is_trained is True
+
+    test_img = next(Path("data/raw/whole_plant/test/Tomato_Fusarium_Wilt").rglob("*.jpg"))
+    res = predictor.predict(test_img, crop_hint="tomato")
+    if res.disease:
+        assert "grape" not in res.disease.lower()
+    assert "grape" not in res.top1_label.lower()
+    for cand in res.predictions:
+        assert "grape" not in cand["label"].lower()
+
+
+def test_unknown_crop_cannot_return_disease():
+    """Regression test proving unknown crop cannot return any disease."""
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    assert predictor.is_trained is True
+
+    test_img = next(Path("data/raw/whole_plant/test").rglob("*.jpg"))
+    res = predictor.predict(test_img, crop_hint="Unknown")
+    assert res.supported is False
+    assert res.disease is None
+    assert res.predictions == []
+
+
+def test_non_leaf_inputs_cannot_use_leaf_model():
+    """Regression test proving non-leaf inputs cannot access leaf model."""
+    from src.whole_plant.router import WholePlantRouter
+    router = WholePlantRouter()
+    test_img = next(Path("data/raw/whole_plant/test").rglob("*.jpg"))
+
+    non_leaf_views = ["canopy", "stem", "fruit", "root", "bark", "unknown", "non_plant"]
+    for vp in non_leaf_views:
+        res = router.route(test_img, crop_hint="Corn (Maize)", viewpoint_hint=vp)
+        assert res.disease is None
+        assert res.supported is False
+        assert "leaf" not in res.checkpoint_path.lower()
+        assert "mobilenet" not in res.checkpoint_path.lower()
+
+
+def test_missing_checkpoint_returns_safe_abstention(tmp_path):
+    """Regression test proving missing checkpoint returns safe abstention."""
+    from src.whole_plant.router import WholePlantRouter
+    missing_ckpt = tmp_path / "nonexistent.pt"
+    router = WholePlantRouter(model_path=missing_ckpt)
+    test_img = next(Path("data/raw/whole_plant/test").rglob("*.jpg"))
+
+    res = router.route(test_img, crop_hint="Corn (Maize)", viewpoint_hint="whole_plant")
+    assert res.supported is False
+    assert res.disease is None
+    assert res.status == "needs_training_data"
+    assert "not trained" in res.fallback_reason.lower() or "not deployed" in res.fallback_reason.lower()
+
+
+def test_llm_api_failure_does_not_break_vision():
+    """Regression test proving LLM API failure does not break image routing or prediction."""
+    from src.orchestrator.router import AutonomousRouter
+    from src.orchestrator.llm_service import AdvisorySynthesisService
+
+    router = AutonomousRouter()
+    synthesis = AdvisorySynthesisService()
+
+    # Mock LLM client raising an API exception
+    synthesis.client = MagicMock()
+    synthesis.client.models.generate_content.side_effect = RuntimeError("503 Service Unavailable / API Failed")
+
+    test_img = next(Path("data/raw/whole_plant/test/Tomato_Fusarium_Wilt").rglob("*.jpg"))
+    telemetry = router.route_and_execute(
+        user_text="What disease is on this tomato plant?",
+        image_input=test_img,
+        crop_hint="Tomato",
+        is_new_image=True,
+    )
+
+    assert "vision_result" in telemetry
+    v_res = telemetry["vision_result"]
+    assert v_res is not None
+    assert v_res["plant_detected"] is True
+    assert v_res["crop"] == "Tomato" or v_res["crop_species"] == "Tomato"
+
+    # Advisory generation handles failure gracefully without throwing
+    advisory = synthesis.generate_advisory(telemetry)
+    assert advisory is not None
+    assert "en" in advisory and "kn" in advisory
+    assert len(advisory["en"]) > 20
+    assert synthesis.last_llm_status == "LLM unavailable"
 
 
 def test_leaf_classifier_is_never_used():

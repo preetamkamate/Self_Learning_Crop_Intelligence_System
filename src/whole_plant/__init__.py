@@ -14,6 +14,7 @@ from src.whole_plant.predict import (
     WholePlantPredictionResult,
     WholePlantPredictor,
 )
+from src.whole_plant.router import WholePlantRouter
 from src.whole_plant.train import WholePlantModel, train_whole_plant_model
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "WholePlantModel",
     "WholePlantPredictor",
     "WholePlantPredictionResult",
+    "WholePlantRouter",
     "train_whole_plant_model",
     "evaluate_whole_plant_model",
     "has_training_images",

@@ -45,7 +45,7 @@ class AdvisorySynthesisService:
         self._init_client()
 
     def _init_client(self):
-        # CHANGED: Dynamically reload .env to ensure fresh API keys are read immediately
+        # Dynamically reload .env to ensure fresh API keys are read immediately
         load_dotenv(ROOT_DIR / ".env", override=True)
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip() or config.GEMINI_API_KEY
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or config.GEMINI_MODEL
@@ -53,9 +53,6 @@ class AdvisorySynthesisService:
             self.model_name,
             "gemini-3.5-flash-lite",
             "gemini-3.8-flash",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
         ]
         self.client = None
 
@@ -69,17 +66,14 @@ class AdvisorySynthesisService:
                 )
             except Exception as e:
                 self.client = None
-                self.last_llm_status = f"Client Init Failed ({e})"
+                self.last_llm_status = "LLM unavailable"
                 logging.warning(
                     "AdvisorySynthesisService: Failed to initialize Google GenAI Client: %s. Using local fallback.",
                     e,
                 )
         else:
             self.client = None
-            if not self.api_key:
-                self.last_llm_status = "Local Fallback (GEMINI_API_KEY not set)"
-            else:
-                self.last_llm_status = "Local Fallback (google-genai unavailable)"
+            self.last_llm_status = "LLM unavailable"
 
     def _build_system_instruction(self) -> str:
         """
@@ -309,7 +303,7 @@ class AdvisorySynthesisService:
                 logging.warning("AdvisorySynthesisService: Gemini model '%s' failed: %s", model, e)
                 continue
 
-        self.last_llm_status = f"API Error ({last_err[:50]})" if 'last_err' in locals() else "API Offline"
+        self.last_llm_status = "LLM unavailable"
         logging.warning("AdvisorySynthesisService: All Gemini models failed or offline (%s). Falling back to local synthesis.", self.last_llm_status)
         return None
 
@@ -461,15 +455,15 @@ class AdvisorySynthesisService:
         if (intent == "disease_diagnosis" and vision) or (vision and not is_followup):
             status = vision.get("status", "confident") if vision else "confident"
 
-            # 1. OOD Non-Plant Refusal
+            # 1. OOD Non-Plant Refusal & Safe Abstention
             if status in ["needs_training_data", "whole_plant_not_trained"]:
-                en = "ℹ️ **Whole-plant diagnosis is not trained yet**\n\nAdd approved labeled whole-plant images before diagnosis."
-                kn = "ℹ️ **ಸಂಪೂರ್ಣ ಗಿಡದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ**\n\nರೋಗನಿರ್ಣಯಕ್ಕೆ ಮುನ್ನ ಅನುಮೋದಿತ ಲೇಬಲ್ ಮಾಡಿದ ಫೋಟೋಗಳನ್ನು ಒದಗಿಸಿ."
+                en = "ℹ️ **Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.**\n\nAdd approved labeled whole-plant images before diagnosis."
+                kn = "ℹ️ **ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ/ಕೋನದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\nರೋಗನಿರ್ಣಯಕ್ಕೆ ಮುನ್ನ ಅನುಮೋದಿತ ಲೇಬಲ್ ಮಾಡಿದ ಫೋಟೋಗಳನ್ನು ಒದಗಿಸಿ."
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-            if status in ["unsupported", "whole_plant_unsupported"]:
-                en = "ℹ️ **Whole plant detected, but this crop or disease is not supported yet.**\n\nNo disease or chemical treatment is recommended to prevent off-target pesticide damage."
-                kn = "ℹ️ **ಸಂಪೂರ್ಣ ಗಿಡ ಪತ್ತೆಯಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ ಅಥವಾ ರೋಗವು ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.**\n\nತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಪ್ಪಿಸಲು ಯಾವುದೇ ರೋಗ ಅಥವಾ ರಾಸಾಯನಿಕ ಚಿಕಿತ್ಸೆಯನ್ನು ಶಿಫಾರಸು ಮಾಡಲಾಗಿಲ್ಲ."
+            if status in ["unsupported", "whole_plant_unsupported", "unsupported_crop_part"] or vision.get("supported") is False:
+                en = "ℹ️ **Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.**\n\nNo disease or chemical treatment is recommended to prevent off-target pesticide damage."
+                kn = "ℹ️ **ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ/ಕೋನದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\nತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಪ್ಪಿಸಲು ಯಾವುದೇ ರೋಗ ಅಥವಾ ರಾಸಾಯನಿಕ ಚಿಕಿತ್ಸೆಯನ್ನು ಶಿಫಾರಸು ಮಾಡಲಾಗಿಲ್ಲ."
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
             if status == "out_of_distribution":
