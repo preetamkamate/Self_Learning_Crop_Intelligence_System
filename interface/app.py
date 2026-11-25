@@ -362,8 +362,15 @@ for idx, msg in enumerate(st.session_state.messages):
                                 unsafe_allow_html=True,
                             )
                             st.caption(f"**Safe Result**: Non-plant image detected. No disease predicted.")
-                        elif status in ["unsupported", "unsupported_crop_part", "whole_plant_unsupported"] or not vision.get("supported", False):
+                        elif status in ["unsupported", "unsupported_crop_part", "whole_plant_unsupported", "unsupported_crop", "unsupported_viewpoint", "unsupported_organ_view", "pest_guidance_provided"] or not vision.get("supported", False):
                             st.info("Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.")
+                            pg = vision.get("photo_guidance")
+                            if pg and isinstance(pg, dict):
+                                title = pg.get("title_kn") if active_lang == "kn" else pg.get("title_en")
+                                inst = pg.get("instructions_kn") if active_lang == "kn" else pg.get("instructions_en")
+                                if title and inst:
+                                    with st.expander(f"📷 {title}", expanded=True):
+                                        st.markdown(inst)
                         elif status in ["uncertain_disease", "uncertain"]:
                             st.markdown(
                                 f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS</span>',

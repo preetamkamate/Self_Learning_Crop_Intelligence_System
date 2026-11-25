@@ -139,6 +139,7 @@ class WholePlantPredictionResult:
     selected_model: str = str(DEFAULT_MODEL_PATH)
     model_path: str = str(DEFAULT_MODEL_PATH)
     source_evidence: Optional[Dict[str, Any]] = None
+    photo_guidance: Optional[Dict[str, Any]] = None
     debug_info: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -192,6 +193,7 @@ class WholePlantPredictionResult:
         data["predictions"] = self.predictions if self.supported else []
         data["is_healthy"] = (self.status == "healthy")
         data["source_evidence"] = self.source_evidence if self.supported else None
+        data["photo_guidance"] = self.photo_guidance
         data["debug_info"] = {
             "crop_route": self.crop,
             "viewpoint_route": self.viewpoint,

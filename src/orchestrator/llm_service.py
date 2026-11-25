@@ -461,9 +461,20 @@ class AdvisorySynthesisService:
                 kn = "ℹ️ **ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ/ಕೋನದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\nರೋಗನಿರ್ಣಯಕ್ಕೆ ಮುನ್ನ ಅನುಮೋದಿತ ಲೇಬಲ್ ಮಾಡಿದ ಫೋಟೋಗಳನ್ನು ಒದಗಿಸಿ."
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
-            if status in ["unsupported", "whole_plant_unsupported", "unsupported_crop_part"] or vision.get("supported") is False:
-                en = "ℹ️ **Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.**\n\nNo disease or chemical treatment is recommended to prevent off-target pesticide damage."
-                kn = "ℹ️ **ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ/ಕೋನದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\nತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಪ್ಪಿಸಲು ಯಾವುದೇ ರೋಗ ಅಥವಾ ರಾಸಾಯನಿಕ ಚಿಕಿತ್ಸೆಯನ್ನು ಶಿಫಾರಸು ಮಾಡಲಾಗಿಲ್ಲ."
+            if status in ["unsupported", "whole_plant_unsupported", "unsupported_crop_part", "unsupported_crop", "unsupported_viewpoint", "unsupported_organ_view", "pest_guidance_provided"] or vision.get("supported") is False:
+                pg = vision.get("photo_guidance")
+                guidance_en = ""
+                guidance_kn = ""
+                if isinstance(pg, dict):
+                    title_en = pg.get("title_en", "Honest Photo Guidance")
+                    title_kn = pg.get("title_kn", "ಫೋಟೋ ತೆಗೆಯುವ ನಿಖರ ಮಾರ್ಗದರ್ಶನ")
+                    inst_en = pg.get("instructions_en", "")
+                    inst_kn = pg.get("instructions_kn", "")
+                    guidance_en = f"\n\n📷 **{title_en}**:\n{inst_en}"
+                    guidance_kn = f"\n\n📷 **{title_kn}**:\n{inst_kn}"
+
+                en = f"ℹ️ **Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.**\n\nNo disease or chemical treatment is recommended to prevent off-target pesticide damage.{guidance_en}"
+                kn = f"ℹ️ **ಕೃಷಿ ಸಸ್ಯ ಗುರುತಿಸಲಾಗಿದೆ, ಆದರೆ ಈ ಬೆಳೆ/ಕೋನದ ರೋಗನಿರ್ಣಯ ಮಾದರಿಯು ಇನ್ನೂ ತರಬೇತಿಯಲ್ಲಿಲ್ಲ.**\n\nತಪ್ಪಾದ ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ ತಪ್ಪಿಸಲು ಯಾವುದೇ ರೋಗ ಅಥವಾ ರಾಸಾಯನಿಕ ಚಿಕಿತ್ಸೆಯನ್ನು ಶಿಫಾರಸು ಮಾಡಲಾಗಿಲ್ಲ.{guidance_kn}"
                 return {"en": en, "kn": kn, "chosen_response": kn if language == "kn" else en}
 
             if status == "out_of_distribution":

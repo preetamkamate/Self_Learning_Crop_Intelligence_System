@@ -188,6 +188,14 @@ class AutonomousRouter:
             if not detected_part_hint or detected_part_hint in ["Unknown", "Auto-detect", None]:
                 if "leaf" in text_lower or "leaves" in text_lower or "foliar" in text_lower:
                     detected_part_hint = "leaf"
+                elif "stem" in text_lower or "branch" in text_lower or "stalk" in text_lower:
+                    detected_part_hint = "stem"
+                elif "fruit" in text_lower or "pod" in text_lower or "berry" in text_lower or "grain" in text_lower:
+                    detected_part_hint = "fruit"
+                elif "root" in text_lower or "tuber" in text_lower:
+                    detected_part_hint = "root"
+                elif "canopy" in text_lower:
+                    detected_part_hint = "canopy"
                 elif "whole" in text_lower or "plant" in text_lower or "field" in text_lower:
                     detected_part_hint = "whole_plant"
 
@@ -195,6 +203,7 @@ class AutonomousRouter:
                 image_input,
                 crop_hint=detected_crop_hint,
                 viewpoint_hint=detected_part_hint,
+                user_text=user_text,
             )
             vision_result = wp_res.to_dict()
             state.set_vision_result(vision_result, image_hash=image_hash)

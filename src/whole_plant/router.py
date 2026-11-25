@@ -30,6 +30,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.whole_plant.dataset import RAW_WHOLE_PLANT_DIR, SUPPORTED_VIEWPOINTS
+from src.modular_vision.photo_guidance import get_photo_guidance
 from src.whole_plant.predict import (
     NON_PLANT_MSG,
     UNSUPPORTED_MSG,
@@ -104,11 +105,15 @@ class WholePlantRouter:
         crop_hint: Optional[str] = None,
         viewpoint_hint: Optional[str] = None,
         confidence_threshold: float = 0.40,
+        user_text: Optional[str] = None,
+        symptom_desc: Optional[str] = None,
+        **kwargs,
     ) -> WholePlantPredictionResult:
         """
         Main entry point for routing an image query.
         Validates viewpoint and crop, verifies checkpoint and evaluation report presence,
         and enforces zero cross-viewpoint / cross-crop leakage.
+        Provides honest photo guidance when a route cannot be diagnosed.
         """
         crop = self.normalize_crop(crop_hint)
         viewpoint = self.normalize_viewpoint(viewpoint_hint)
@@ -128,6 +133,7 @@ class WholePlantRouter:
                 is_ood=True,
                 top1_label=NON_PLANT_MSG,
                 message=NON_PLANT_MSG,
+                photo_guidance=get_photo_guidance(viewpoint="leaf", is_non_plant=True),
             )
 
         # 2. Checkpoint & Deployment Gate
@@ -145,6 +151,7 @@ class WholePlantRouter:
                 checkpoint_path=str(self.model_path),
                 top1_label=UNSUPPORTED_MSG,
                 message=UNSUPPORTED_MSG,
+                photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
             )
 
         # 3. Viewpoint & Crop Routing Gate
@@ -170,6 +177,7 @@ class WholePlantRouter:
                 checkpoint_path=str(self.model_path),
                 top1_label=UNSUPPORTED_MSG,
                 message=UNSUPPORTED_MSG,
+                photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop, is_unsupported_crop=True),
             )
 
         valid_vps = crop_vp_map.get(crop, ["whole_plant"])
@@ -189,6 +197,7 @@ class WholePlantRouter:
                 checkpoint_path=str(self.model_path),
                 top1_label=UNSUPPORTED_MSG,
                 message=UNSUPPORTED_MSG,
+                photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
             )
 
         # 4. Whole-Plant Viewpoint Route
