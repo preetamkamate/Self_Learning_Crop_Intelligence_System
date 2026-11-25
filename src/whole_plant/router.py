@@ -147,11 +147,36 @@ class WholePlantRouter:
                 message=UNSUPPORTED_MSG,
             )
 
-        # 3. Viewpoint Isolation (Rule: non-whole-plant viewpoints must never call leaf or whole-plant classifier)
-        if viewpoint in ["canopy", "stem", "fruit", "root", "bark", "leaf", "unknown"]:
-            reason = f"Viewpoint '{viewpoint}' diagnosis is not trained yet."
-            if viewpoint == "leaf":
-                reason = "Leaf viewpoint diagnosis is not supported in whole-plant model. Legacy foliar model is archived."
+        # 3. Viewpoint & Crop Routing Gate
+        # Validate that the crop is supported and the viewpoint is trained for this crop.
+        crop_vp_map = getattr(self.predictor, "crop_viewpoint_map", {
+            "Corn (Maize)": ["whole_plant"],
+            "Tomato": ["whole_plant"],
+            "Apple": ["leaf"],
+            "Cassava": ["leaf"],
+        })
+        supported_crops = getattr(self.predictor, "supported_crops", ["Corn (Maize)", "Tomato", "Apple", "Cassava"])
+
+        if crop == "Unknown" or crop not in supported_crops:
+            return WholePlantPredictionResult(
+                plant_detected=True,
+                crop=crop,
+                viewpoint=viewpoint,
+                supported=False,
+                disease=None,
+                confidence=0.0,
+                status="unsupported",
+                fallback_reason="Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.",
+                checkpoint_path=str(self.model_path),
+                top1_label=UNSUPPORTED_MSG,
+                message=UNSUPPORTED_MSG,
+            )
+
+        valid_vps = crop_vp_map.get(crop, ["whole_plant"])
+        v_mapped = "leaf" if viewpoint in ["leaf", "foliar", "single_leaf", "close_up_leaf"] else viewpoint
+
+        if v_mapped not in valid_vps:
+            reason = f"Viewpoint '{viewpoint}' diagnosis is not trained yet for crop '{crop}'."
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=crop,

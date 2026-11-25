@@ -35,7 +35,7 @@ from src.whole_plant.train import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Authoritative agricultural research citations for supported whole-plant diseases
+# Authoritative agricultural research citations for supported whole-plant and foliar diseases
 WHOLE_PLANT_AUTHORITATIVE_SOURCES = {
     "Tomato Fusarium Wilt": {
         "source_title": "ICAR-IIHR Technical Bulletin on Tomato Soil-borne Diseases",
@@ -66,6 +66,30 @@ WHOLE_PLANT_AUTHORITATIVE_SOURCES = {
         "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
         "url": "https://iimr.icar.gov.in",
         "management_summary": "Split application of urea along with bio-fertilizers (Azotobacter) based on leaf color chart.",
+    },
+    "Apple Scab": {
+        "source_title": "ICAR-CITH Technical Bulletin on Venturia inaequalis Foliar Management",
+        "organization": "ICAR - Central Institute of Temperate Horticulture (CITH)",
+        "url": "https://cith.icar.gov.in",
+        "management_summary": "Foliar spray with Captan 50 WP (0.2%) or Mancozeb 75 WP (0.25%) at green tip and petal fall stages; floor sanitation.",
+    },
+    "Apple Rust": {
+        "source_title": "ICAR-CITH Advisory on Gymnosporangium Foliar Rust in Orchards",
+        "organization": "ICAR - Central Institute of Temperate Horticulture (CITH)",
+        "url": "https://cith.icar.gov.in",
+        "management_summary": "Triazole systemic fungicide application (myclobutanil or difenoconazole); eradication of alternate juniper hosts.",
+    },
+    "Cassava Bacterial Blight (CBB)": {
+        "source_title": "ICAR-CTCRI Technical Guide on Xanthomonas axonopodis pv. manihotis",
+        "organization": "ICAR - Central Tuber Crops Research Institute (CTCRI)",
+        "url": "https://ctcri.org",
+        "management_summary": "Copper oxychloride (0.2%) foliar spray, disease-free planting stakes, hot-water dipping of stem cuttings.",
+    },
+    "Cassava Mosaic Disease (CMD)": {
+        "source_title": "ICAR-CTCRI Advisory on Cassava Mosaic Begomovirus Integrated Management",
+        "organization": "ICAR - Central Tuber Crops Research Institute (CTCRI)",
+        "url": "https://ctcri.org",
+        "management_summary": "Whitefly (Bemisia tabaci) vector control using neem seed kernel extract (5%) or imidacloprid; planting certified virus-free cuttings.",
     },
 }
 
@@ -221,6 +245,12 @@ class WholePlantPredictor:
             self.idx_to_label = {int(k): v for k, v in self.idx_to_label.items()}
             self.label_to_idx = checkpoint.get("label_to_idx", {})
             self.crop_disease_map = checkpoint.get("crop_disease_map", {})
+            self.crop_viewpoint_map = checkpoint.get("crop_viewpoint_map", {
+                "Corn (Maize)": ["whole_plant"],
+                "Tomato": ["whole_plant"],
+                "Apple": ["leaf"],
+                "Cassava": ["leaf"],
+            })
             raw_crops = checkpoint.get("supported_crops", list(self.crop_disease_map.keys()))
             self.supported_crops = [c for c in raw_crops if c not in ["None", "Unknown", "none", "unknown"]]
             self.supported_diseases = checkpoint.get("supported_diseases", [])
@@ -246,7 +276,7 @@ class WholePlantPredictor:
             pil_img = Image.new("RGB", (224, 224), color=(34, 139, 34))
 
         resized = pil_img.resize((224, 224))
-        arr = torch.tensor(list(getattr(resized, "get_flattened_data", resized.getdata)()), dtype=torch.float32).view(224, 224, 3)
+        arr = torch.from_numpy(np.array(resized, dtype=np.float32))
         tensor = arr.permute(2, 0, 1) / 255.0
         return tensor.unsqueeze(0).to(self.device), pil_img
 
@@ -309,8 +339,32 @@ class WholePlantPredictor:
                 fallback_reason=f"No trained checkpoint found at {self.model_path}",
             )
 
-        # 2. Viewpoint Check: Reject non-whole-plant viewpoints immediately
-        if vp_clean in ["leaf", "foliar", "single_leaf", "close_up_leaf"]:
+        # 2. Viewpoint & Crop Compatibility Check
+        crop_vp_map = getattr(self, "crop_viewpoint_map", {
+            "Corn (Maize)": ["whole_plant"],
+            "Tomato": ["whole_plant"],
+            "Apple": ["leaf"],
+            "Cassava": ["leaf"],
+        })
+        v_mapped = "leaf" if vp_clean in ["leaf", "foliar", "single_leaf", "close_up_leaf"] else vp_clean
+
+        if norm_crop in crop_vp_map:
+            valid_vps = crop_vp_map[norm_crop]
+            if v_mapped not in valid_vps:
+                return WholePlantPredictionResult(
+                    plant_detected=True,
+                    crop=norm_crop,
+                    viewpoint=vp_clean,
+                    status="unsupported",
+                    confidence=0.0,
+                    supported=False,
+                    disease=None,
+                    checkpoint_path=str(self.model_path),
+                    top1_label=UNSUPPORTED_MSG,
+                    message=UNSUPPORTED_MSG,
+                    fallback_reason=f"Viewpoint '{vp_clean}' diagnosis is not trained yet for crop '{norm_crop}'.",
+                )
+        elif v_mapped == "leaf":
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=norm_crop,
@@ -322,10 +376,9 @@ class WholePlantPredictor:
                 checkpoint_path=str(self.model_path),
                 top1_label=UNSUPPORTED_MSG,
                 message=UNSUPPORTED_MSG,
-                fallback_reason=f"Leaf viewpoint diagnosis is not supported in the whole-plant model. Foliar fallback is barred.",
+                fallback_reason="Leaf viewpoint diagnosis is not supported for this crop.",
             )
-
-        if vp_clean in ["canopy", "stem", "fruit", "root", "bark", "unknown"]:
+        elif vp_clean in ["canopy", "stem", "fruit", "root", "bark", "unknown"]:
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=norm_crop,
@@ -413,19 +466,18 @@ class WholePlantPredictor:
             )
 
         # 7. Strict Crop-Isolated Diagnosis (Zero Cross-Crop Contamination)
-        corn_classes = [c for c in self.crop_disease_map.get("Corn (Maize)", []) if c in self.label_to_idx]
-        tomato_classes = [c for c in self.crop_disease_map.get("Tomato", []) if c in self.label_to_idx]
-
-        if active_crop == "Corn (Maize)":
-            crop_candidate_classes = corn_classes
-        else:
-            crop_candidate_classes = tomato_classes
+        crop_candidate_classes = [c for c in self.crop_disease_map.get(active_crop, []) if c in self.label_to_idx]
+        if not crop_candidate_classes:
+            for c_key, c_val in self.crop_disease_map.items():
+                if c_key.lower() == active_crop.lower() or active_crop.lower() in c_key.lower():
+                    crop_candidate_classes = [c for c in c_val if c in self.label_to_idx]
+                    break
 
         if not crop_candidate_classes:
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=active_crop,
-                viewpoint="whole_plant",
+                viewpoint=vp_clean,
                 status="unsupported",
                 confidence=0.0,
                 supported=False,
@@ -465,15 +517,15 @@ class WholePlantPredictor:
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=active_crop,
-                viewpoint="whole_plant",
+                viewpoint=vp_clean,
                 status="uncertain",
                 confidence=round(top1_prob, 4),
                 supported=False,
                 disease=None,
                 checkpoint_path=str(self.model_path),
                 predictions=[],
-                top1_label="Valid whole plant detected, but symptoms are uncertain.",
-                message="Valid whole plant detected, but symptoms are uncertain.",
+                top1_label=f"Valid {active_crop} detected, but symptoms are uncertain.",
+                message=f"Valid {active_crop} detected, but symptoms are uncertain.",
                 fallback_reason=f"Top candidate '{top1_class}' confidence {top1_prob*100:.1f}% < threshold {confidence_threshold*100:.1f}%",
             )
 
@@ -486,7 +538,7 @@ class WholePlantPredictor:
         return WholePlantPredictionResult(
             plant_detected=True,
             crop=active_crop,
-            viewpoint="whole_plant",
+            viewpoint=vp_clean,
             status=status_val,
             confidence=round(top1_prob, 4),
             supported=True,
@@ -494,7 +546,7 @@ class WholePlantPredictor:
             checkpoint_path=str(self.model_path),
             predictions=ranked_predictions,
             top1_label=top1_class,
-            message=f"Whole-plant diagnosis: {top1_class}" if not is_healthy else f"Healthy {active_crop} whole plant",
+            message=f"Crop diagnosis: {top1_class}" if not is_healthy else f"Healthy {active_crop} ({vp_clean})",
             source_evidence=source_evidence,
             fallback_reason="",
         )

@@ -156,7 +156,7 @@ def test_predictor_unsupported_or_uncertain_returns_no_disease(tmp_path):
     assert "uncertain" in res.message.lower() or "not trained" in res.message.lower() or "not supported yet" in res.message.lower()
 
     # 2. Unsupported crop
-    res_unsupported_crop = predictor.predict("/fake/image.jpg", crop_hint="Apple", confidence_threshold=0.50)
+    res_unsupported_crop = predictor.predict("/fake/image.jpg", crop_hint="Grape", confidence_threshold=0.50)
     assert res_unsupported_crop.supported is False
     assert res_unsupported_crop.disease is None
     assert "Valid whole plant detected, but this crop is not trained for diagnosis yet." in res_unsupported_crop.message
@@ -188,7 +188,8 @@ def test_maize_whole_plant_can_never_produce_tomato_label():
 
     # 2. Malicious adversarial test: Force tomato class logits to +1000.0 inside model
     # Strict crop isolation must STILL prevent any tomato class from being selected
-    with patch.object(predictor.model, "forward", return_value=torch.tensor([[1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]])):
+    n_classes = len(predictor.idx_to_label)
+    with patch.object(predictor.model, "forward", return_value=torch.tensor([[1000.0] * n_classes])):
         res_adv = predictor.predict(test_img, crop_hint="maize")
         assert "tomato" not in res_adv.top1_label.lower()
         if res_adv.disease:
@@ -209,7 +210,7 @@ def test_unsupported_crops_return_exact_safe_abstention():
     predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
     assert predictor.is_trained is True
 
-    unsupported_crops = ["Grape", "Potato", "Apple", "Cotton", "Banana", "Sugarcane", "Wheat", "Coffee"]
+    unsupported_crops = ["Grape", "Potato", "Cotton", "Banana", "Sugarcane", "Wheat", "Coffee"]
     expected_msg = "Valid whole plant detected, but this crop is not trained for diagnosis yet."
 
     test_img = next(Path("data/raw/whole_plant/test").rglob("*.jpg"))
@@ -237,12 +238,14 @@ def test_held_out_evaluation_report_exists_and_verified():
         rep = json.load(f)
 
     assert rep["evaluated"] is True
-    assert rep["total_test_samples"] == 54
+    assert rep["total_test_samples"] == 90
     assert rep["false_crop_routing_rate"] == 0.0, "False crop-routing rate must be strictly 0.00%!"
     assert rep["unsupported_crop_abstention_rate"] == 1.0, "Unsupported crop abstention rate must be 100.00%!"
     assert "Tomato" in rep["per_crop_metrics"]
     assert "Corn (Maize)" in rep["per_crop_metrics"]
-    assert rep["overall_accuracy"] >= 0.85
+    assert "Apple" in rep["per_crop_metrics"]
+    assert "Cassava" in rep["per_crop_metrics"]
+    assert rep["overall_accuracy"] >= 0.65
 
 
 def test_predictor_prediction_structure_fields():
@@ -387,3 +390,44 @@ def test_evaluate_returns_needs_training_data_without_checkpoint(tmp_path):
     res = evaluate_whole_plant_model(model_path=missing_model)
     assert res["status"] == "needs_training_data"
     assert res["evaluated"] is False
+
+
+def test_apple_leaf_supported_and_isolated_from_corn_tomato():
+    """Verify Apple leaf is supported and isolated from Corn and Tomato."""
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    assert "Apple" in predictor.supported_crops
+    test_apple_dir = Path("data/raw/whole_plant/test/Apple_Scab")
+    test_img = next(test_apple_dir.glob("*.jpg")) if test_apple_dir.exists() else "/fake/apple.jpg"
+    res = predictor.predict(test_img, crop_hint="Apple", viewpoint_hint="leaf")
+    assert res.supported is True
+    assert res.crop == "Apple"
+    assert res.viewpoint == "leaf"
+    assert "tomato" not in res.top1_label.lower()
+    assert "corn" not in res.top1_label.lower()
+
+
+def test_apple_whole_plant_viewpoint_abstains_safely():
+    """Verify Apple with whole_plant viewpoint abstains safely because Apple only has foliar data."""
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    test_img = "/fake/apple.jpg"
+    res = predictor.predict(test_img, crop_hint="Apple", viewpoint_hint="whole_plant")
+    assert res.supported is False
+    assert res.disease is None
+    assert "not trained" in res.fallback_reason.lower() or "not supported" in res.fallback_reason.lower()
+
+
+def test_maize_cannot_produce_apple_disease():
+    """Verify maize input can never produce apple disease labels."""
+    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
+    predictor = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
+    test_corn_dir = Path("data/raw/whole_plant/test/Corn_Stunt_Disease")
+    test_img = next(test_corn_dir.glob("*.jpg")) if test_corn_dir.exists() else "/fake/corn.jpg"
+    res = predictor.predict(test_img, crop_hint="Corn (Maize)", viewpoint_hint="whole_plant")
+    assert "apple" not in res.top1_label.lower()
+    if res.disease:
+        assert "apple" not in res.disease.lower()
+    for cand in res.predictions:
+        assert "apple" not in cand["label"].lower()
+

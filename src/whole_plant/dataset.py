@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from PIL import Image
+import numpy as np
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -432,7 +433,7 @@ class WholePlantDataset(Dataset):
             img_tensor = self.transform(img)
         elif torch is not None:
             resized = img.resize((224, 224))
-            arr = torch.tensor(list(getattr(resized, "get_flattened_data", resized.getdata)()), dtype=torch.float32).view(224, 224, 3)
+            arr = torch.from_numpy(np.array(resized, dtype=np.float32))
             img_tensor = arr.permute(2, 0, 1) / 255.0
         else:
             img_tensor = img

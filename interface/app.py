@@ -187,7 +187,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🌿 Crop & Plant Viewpoint Context")
-    crop_options = ["Auto-detect", "Tomato", "Potato", "Corn (Maize)", "Cotton", "Paddy (Rice)", "Chilli", "Citrus", "Coconut", "Apple", "Grape", "Other"]
+    crop_options = ["Auto-detect", "Tomato", "Potato", "Corn (Maize)", "Apple", "Cassava", "Cotton", "Paddy (Rice)", "Chilli", "Citrus", "Coconut", "Grape", "Other"]
     confirmed_crop = st.selectbox(
         "Crop / Tree Species:",
         crop_options,
@@ -544,7 +544,7 @@ with st.expander("📷 Upload Plant Photo (Whole-Plant Field View, Canopy, Stem,
         p = config.RAW_DATA_DIR / "sample_apple_scab.jpg"
         if p.exists():
             sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please diagnose the disease on this leaf."
+            sample_image_label = "Please diagnose the disease on this apple leaf."
             sample_image_trigger = True
     if samp_cols[2].button("🍅 Tomato Blight", key="btn_tomato"):
         p = config.RAW_DATA_DIR / "sample_tomato_early_blight.jpg"

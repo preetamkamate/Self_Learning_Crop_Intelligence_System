@@ -135,19 +135,41 @@ def train_whole_plant_model(
     idx_to_label = {i: lbl for lbl, i in label_to_idx.items()}
 
     crop_disease_map: Dict[str, List[str]] = {}
+    crop_viewpoint_map: Dict[str, List[str]] = {}
     for r in all_records:
         c = r.crop
         d = r.disease_label or r.disease
+        vp = r.viewpoint
         if c not in crop_disease_map:
             crop_disease_map[c] = []
         if d and d not in crop_disease_map[c]:
             crop_disease_map[c].append(d)
+        if c not in crop_viewpoint_map:
+            crop_viewpoint_map[c] = []
+        if vp and vp not in crop_viewpoint_map[c]:
+            crop_viewpoint_map[c].append(vp)
+
+    def whole_plant_collate_fn(batch):
+        imgs = torch.stack([b[0] for b in batch])
+        targets = torch.tensor([b[1] for b in batch], dtype=torch.long)
+        meta = [b[2] for b in batch]
+        return imgs, targets, meta
 
     train_ds = WholePlantDataset(train_records, label_to_idx=label_to_idx)
     val_ds = WholePlantDataset(val_records, label_to_idx=label_to_idx)
 
-    train_loader = DataLoader(train_ds, batch_size=min(batch_size, len(train_ds)), shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=min(batch_size, len(val_ds)), shuffle=False)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=min(batch_size, len(train_ds)),
+        shuffle=True,
+        collate_fn=whole_plant_collate_fn,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=min(batch_size, len(val_ds)),
+        shuffle=False,
+        collate_fn=whole_plant_collate_fn,
+    )
 
     if device is None:
         target_device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -207,6 +229,7 @@ def train_whole_plant_model(
         "label_to_idx": label_to_idx,
         "idx_to_label": idx_to_label,
         "crop_disease_map": crop_disease_map,
+        "crop_viewpoint_map": crop_viewpoint_map,
         "supported_crops": clean_supported_crops,
         "supported_diseases": clean_supported_diseases,
         "val_accuracy": val_acc,
@@ -221,6 +244,7 @@ def train_whole_plant_model(
         "label_to_idx": label_to_idx,
         "idx_to_label": {str(k): v for k, v in idx_to_label.items()},
         "crop_disease_map": crop_disease_map,
+        "crop_viewpoint_map": crop_viewpoint_map,
         "supported_crops": clean_supported_crops,
         "supported_diseases": clean_supported_diseases,
     }

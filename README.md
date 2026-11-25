@@ -173,20 +173,23 @@ python3 test_vision_decision_logic.py
 # 7. Run zero cross-crop contamination regression suite
 python3 test_hierarchical_safety.py
 
-# 8. Whole-Plant Disease Model (Independent Module)
-# 8a. Prepare local whole-plant dataset folders:
+# 8. Crop-Aware Diagnosis Model (Multi-Crop & Multi-Viewpoint)
+# 8a. (Optional) Ingest local datasets from ~/Downloads (Plant Pathology 2021, Cassava):
+python3 scripts/ingest_local_downloads.py
+
+# 8b. Prepare local dataset folders:
 #     data/raw/whole_plant/train/
 #     data/raw/whole_plant/val/
 #     data/raw/whole_plant/test/
-#     (each with metadata.json containing crop, status, disease_label, viewpoint)
+#     (each with metadata.json containing image_path, crop, viewpoint, health_status, disease_label, source_id)
 
-# 8b. Train whole-plant model from local folders:
-python3 -m src.whole_plant.train --data-dir data/raw/whole_plant --output-model models/whole_plant/model.pt --epochs 10
+# 8c. Train crop-aware model from local folders:
+python3 -m src.whole_plant.train --data-dir data/raw/whole_plant --output-model models/whole_plant/model.pt --epochs 15
 
-# 8c. Evaluate on held-out test folder (precision, recall, F1, confusion matrix, abstention rate):
+# 8d. Evaluate on held-out test folder (precision, recall, F1, confusion matrix, abstention rate):
 python3 -m src.whole_plant.evaluate --test-dir data/raw/whole_plant/test --model-path models/whole_plant/model.pt
 
-# 8d. Run whole-plant unit tests:
+# 8e. Run whole-plant and multi-crop unit tests:
 pytest tests/test_whole_plant.py -v
 
 # 9. Launch Streamlit UI

@@ -125,7 +125,7 @@ def evaluate_whole_plant_model(
         y_true.append(true_idx)
         crop_true_list.append(r.crop)
 
-        res = predictor.predict(r.image_path, crop_hint=r.crop)
+        res = predictor.predict(r.image_path, crop_hint=r.crop, viewpoint_hint=r.viewpoint)
         predicted_crop = res.crop
         crop_pred_list.append(predicted_crop)
 
@@ -137,7 +137,7 @@ def evaluate_whole_plant_model(
                 non_plant_rejected += 1
 
         # Cross-crop routing safety check
-        if r.crop in ["Corn (Maize)", "Tomato"] and predicted_crop in ["Corn (Maize)", "Tomato"]:
+        if r.crop in predictor.supported_crops and predicted_crop in predictor.supported_crops:
             if r.crop != predicted_crop:
                 false_crop_routing_count += 1
                 logging.error("CROSS-CROP ROUTING LEAK: True %s routed as %s!", r.crop, predicted_crop)
@@ -159,24 +159,24 @@ def evaluate_whole_plant_model(
             y_pred.append(pred_idx)
 
     # 3. Crop-Routing Error
-    in_dist_samples = sum(1 for c in crop_true_list if c in ["Corn (Maize)", "Tomato"])
+    in_dist_samples = sum(1 for c in crop_true_list if c in predictor.supported_crops)
     crop_routing_error = (false_crop_routing_count / in_dist_samples) if in_dist_samples > 0 else 0.0
 
     # 4. Non-Plant Rejection Rate
     non_plant_rejection_rate = (non_plant_rejected / non_plant_total) if non_plant_total > 0 else 1.0
 
     # 5. Unsupported-Route Abstention Rate Test
-    # Test on unsupported crops: Grape, Potato, Apple, Cotton, Banana, Sugarcane, Wheat
-    unsupported_crops_to_test = ["Grape", "Potato", "Apple", "Cotton", "Banana", "Sugarcane", "Wheat"]
-    # Test on unsupported viewpoints: canopy, stem, fruit, root, bark, leaf, unknown
-    unsupported_views_to_test = ["canopy", "stem", "fruit", "root", "bark", "leaf", "unknown"]
+    # Test on unsupported crops: Grape, Potato, Cotton, Banana, Sugarcane, Wheat
+    unsupported_crops_to_test = ["Grape", "Potato", "Cotton", "Banana", "Sugarcane", "Wheat"]
+    # Test on unsupported viewpoints: canopy, stem, fruit, root, bark
+    unsupported_views_to_test = ["canopy", "stem", "fruit", "root", "bark"]
 
     unsupported_abstentions = 0
     total_unsupported_tests = len(unsupported_crops_to_test) + len(unsupported_views_to_test)
 
     sample_img = records[0].image_path
     for u_crop in unsupported_crops_to_test:
-        u_res = predictor.predict(sample_img, crop_hint=u_crop)
+        u_res = predictor.predict(sample_img, crop_hint=u_crop, viewpoint_hint="whole_plant")
         if not u_res.supported and u_res.disease is None and len(u_res.predictions) == 0:
             unsupported_abstentions += 1
 
@@ -232,9 +232,9 @@ def evaluate_whole_plant_model(
     macro_recall = float(np.mean(rec_list)) if rec_list else 0.0
     macro_f1 = float(np.mean(f1_list)) if f1_list else 0.0
 
-    # 8. Per-Crop Metrics (Tomato & Corn)
+    # 8. Per-Crop Metrics (All Supported Crops)
     per_crop_metrics: Dict[str, Dict[str, Any]] = {}
-    for crop_name in ["Tomato", "Corn (Maize)"]:
+    for crop_name in predictor.supported_crops:
         crop_classes = [c for c in predictor.crop_disease_map.get(crop_name, []) if c in class_to_idx]
         if crop_classes:
             c_precs = [precision_per_class.get(c, 0.0) for c in crop_classes]

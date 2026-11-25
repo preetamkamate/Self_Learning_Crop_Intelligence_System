@@ -179,10 +179,22 @@ class AutonomousRouter:
                     detected_crop_hint = "Tomato"
                 elif "corn" in text_lower or "maize" in text_lower:
                     detected_crop_hint = "Corn (Maize)"
+                elif "apple" in text_lower:
+                    detected_crop_hint = "Apple"
+                elif "cassava" in text_lower:
+                    detected_crop_hint = "Cassava"
+
+            detected_part_hint = kwargs.get("part_hint", None)
+            if not detected_part_hint or detected_part_hint in ["Unknown", "Auto-detect", None]:
+                if "leaf" in text_lower or "leaves" in text_lower or "foliar" in text_lower:
+                    detected_part_hint = "leaf"
+                elif "whole" in text_lower or "plant" in text_lower or "field" in text_lower:
+                    detected_part_hint = "whole_plant"
+
             wp_res = self.whole_plant_router.route(
                 image_input,
                 crop_hint=detected_crop_hint,
-                viewpoint_hint=kwargs.get("part_hint", None),
+                viewpoint_hint=detected_part_hint,
             )
             vision_result = wp_res.to_dict()
             state.set_vision_result(vision_result, image_hash=image_hash)
