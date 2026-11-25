@@ -35,38 +35,9 @@ from src.whole_plant.train import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Authoritative agricultural research citations for supported whole-plant and foliar diseases
+# Authoritative agricultural research citations for supported authentic diseases
 WHOLE_PLANT_AUTHORITATIVE_SOURCES = {
-    "Tomato Fusarium Wilt": {
-        "source_title": "ICAR-IIHR Technical Bulletin on Tomato Soil-borne Diseases",
-        "organization": "ICAR - Indian Institute of Horticultural Research (IIHR)",
-        "url": "https://iihr.res.in",
-        "management_summary": "Soil solarization, bio-agent Trichoderma viride seed treatment, and resistant varieties.",
-    },
-    "Tomato Heat and Drought Stress": {
-        "source_title": "ICAR Advisory on Abiotic Stress Management in Solanaceous Crops",
-        "organization": "Indian Council of Agricultural Research (ICAR)",
-        "url": "https://icar.org.in",
-        "management_summary": "Drip irrigation scheduling, mulching, and anti-transpirant potassium foliar sprays.",
-    },
-    "Corn Stunt Disease": {
-        "source_title": "ICAR-IIMR Protocol for Maize Spiroplasma Stunt Management",
-        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
-        "url": "https://iimr.icar.gov.in",
-        "management_summary": "Vector control (leafhoppers) using thiamethoxam seed treatment and field sanitation.",
-    },
-    "Corn Fall Armyworm Damage": {
-        "source_title": "ICAR-IIMR Integrated Management Guidelines for Spodoptera frugiperda",
-        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
-        "url": "https://iimr.icar.gov.in",
-        "management_summary": "Pheromone traps, push-pull intercropping with Desmodium, and neem-based botanical spray.",
-    },
-    "Corn Nitrogen Deficiency Chlorosis": {
-        "source_title": "ICAR Nutrient Management & Deficiency Diagnosis in Maize",
-        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
-        "url": "https://iimr.icar.gov.in",
-        "management_summary": "Split application of urea along with bio-fertilizers (Azotobacter) based on leaf color chart.",
-    },
+    # Apple
     "Apple Scab": {
         "source_title": "ICAR-CITH Technical Bulletin on Venturia inaequalis Foliar Management",
         "organization": "ICAR - Central Institute of Temperate Horticulture (CITH)",
@@ -79,6 +50,7 @@ WHOLE_PLANT_AUTHORITATIVE_SOURCES = {
         "url": "https://cith.icar.gov.in",
         "management_summary": "Triazole systemic fungicide application (myclobutanil or difenoconazole); eradication of alternate juniper hosts.",
     },
+    # Cassava
     "Cassava Bacterial Blight (CBB)": {
         "source_title": "ICAR-CTCRI Technical Guide on Xanthomonas axonopodis pv. manihotis",
         "organization": "ICAR - Central Tuber Crops Research Institute (CTCRI)",
@@ -90,6 +62,44 @@ WHOLE_PLANT_AUTHORITATIVE_SOURCES = {
         "organization": "ICAR - Central Tuber Crops Research Institute (CTCRI)",
         "url": "https://ctcri.org",
         "management_summary": "Whitefly (Bemisia tabaci) vector control using neem seed kernel extract (5%) or imidacloprid; planting certified virus-free cuttings.",
+    },
+    # Corn (Maize)
+    "Corn Common Rust": {
+        "source_title": "ICAR-IIMR Protocol for Maize Foliar Rust (Puccinia sorghi) Control",
+        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
+        "url": "https://iimr.icar.gov.in",
+        "management_summary": "Foliar application of Mancozeb (0.25%) or Propiconazole 25 EC (0.1%) at first sign of pustule emergence; resistant hybrid deployment.",
+    },
+    "Corn Northern Leaf Blight": {
+        "source_title": "ICAR-IIMR Protocol on Exserohilum turcicum Management in Kharif Maize",
+        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
+        "url": "https://iimr.icar.gov.in",
+        "management_summary": "Foliar spray with Azoxystrobin + Difenoconazole; crop rotation with non-host leguminous crops and crop residue sanitation.",
+    },
+    "Corn Gray Leaf Spot": {
+        "source_title": "ICAR-IIMR Technical Advisory on Cercospora zeae-maydis Management",
+        "organization": "ICAR - Indian Institute of Maize Research (IIMR)",
+        "url": "https://iimr.icar.gov.in",
+        "management_summary": "Triazole fungicides, balanced soil potassium nutrition, and avoidance of continuous mono-cropping in high-humidity zones.",
+    },
+    # Tomato
+    "Tomato Early Blight": {
+        "source_title": "ICAR-IIHR Technical Guide on Solanaceous Foliar Blights (Alternaria solani)",
+        "organization": "ICAR - Indian Institute of Horticultural Research (IIHR)",
+        "url": "https://iihr.res.in",
+        "management_summary": "Foliar spray with Mancozeb 75 WP (0.2%) or Chlorothalonil 75 WP (0.2%); trellising/staking and removal of lower senescent leaves.",
+    },
+    "Tomato Late Blight": {
+        "source_title": "ICAR-IIHR Emergency Advisory on Phytophthora infestans Outbreaks",
+        "organization": "ICAR - Indian Institute of Horticultural Research (IIHR)",
+        "url": "https://iihr.res.in",
+        "management_summary": "Preventive spray with Metalaxyl + Mancozeb (0.25%) or Cymoxanil + Mancozeb; strict regulation of sprinkler irrigation.",
+    },
+    "Tomato Bacterial Spot": {
+        "source_title": "ICAR-IIHR Advisory on Xanthomonas campestris pv. vesicatoria in Vegetable Crops",
+        "organization": "ICAR - Indian Institute of Horticultural Research (IIHR)",
+        "url": "https://iihr.res.in",
+        "management_summary": "Copper oxychloride (0.3%) combined with Streptocycline (100 ppm) seed treatment and foliar spray; certified pathogen-free nursery stock.",
     },
 }
 
