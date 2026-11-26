@@ -118,7 +118,7 @@ class ModularCropVisionPipeline:
         viewpoint_hint: Optional[str] = None,
         user_text: Optional[str] = None,
         symptom_desc: Optional[str] = None,
-        confidence_threshold: float = 0.40,
+        confidence_threshold: float = 0.25,
     ) -> ModularVisionResult:
         """
         Execute modular agricultural vision evaluation.

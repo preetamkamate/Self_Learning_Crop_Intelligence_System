@@ -182,15 +182,41 @@ class WholePlantRouter:
                 photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
             )
 
-        # 3. Viewpoint & Crop Routing Gate
-        # Validate that the crop is supported and the viewpoint is trained for this crop.
-        crop_vp_map = getattr(self.predictor, "crop_viewpoint_map", {
-            "Corn (Maize)": ["whole_plant"],
-            "Tomato": ["whole_plant"],
-            "Apple": ["leaf"],
-            "Cassava": ["leaf"],
-        })
-        supported_crops = getattr(self.predictor, "supported_crops", ["Corn (Maize)", "Tomato", "Apple", "Cassava"])
+        # 3. Optional Leaf-Only Experimental Route
+        # Enforces: Leaf diagnosis is a separate optional feature and must NEVER be a fallback
+        # for whole_plant, canopy, stem, fruit, or root photos.
+        if viewpoint == "leaf":
+            from src.modular_vision.disease_classifier import ModularDiseaseClassifier
+            leaf_classifier = ModularDiseaseClassifier()
+            leaf_res = leaf_classifier.classify_disease(
+                image_input=image_input,
+                crop=crop,
+                viewpoint="leaf",
+                confidence_threshold=confidence_threshold,
+            )
+            return WholePlantPredictionResult(
+                plant_detected=True,
+                crop=leaf_res.crop,
+                viewpoint="leaf",
+                supported=leaf_res.supported,
+                disease=leaf_res.disease,
+                confidence=leaf_res.confidence,
+                status=leaf_res.status,
+                fallback_reason=leaf_res.fallback_reason or "Optional Leaf-only experimental feature executed.",
+                checkpoint_path=str(leaf_res.checkpoint_path),
+                top1_label=leaf_res.top1_label,
+                message=leaf_res.top1_label,
+                photo_guidance=leaf_res.photo_guidance,
+                margin=leaf_res.margin,
+                chemical_treatment_withheld=leaf_res.chemical_treatment_withheld,
+                model_release_tier="Leaf-Only Experimental (Research Prototype)",
+                is_experimental=True,
+                debug_info=leaf_res.debug_info,
+            )
+
+        # 4. Viewpoint & Crop Routing Gate for Whole-Plant and Canopy
+        crop_vp_map = getattr(self.predictor, "crop_viewpoint_map", {})
+        supported_crops = getattr(self.predictor, "supported_crops", [])
 
         if crop == "Unknown" or crop not in supported_crops:
             return WholePlantPredictionResult(
@@ -208,8 +234,8 @@ class WholePlantRouter:
                 photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop, is_unsupported_crop=True),
             )
 
-        valid_vps = crop_vp_map.get(crop, ["whole_plant"])
-        v_mapped = "leaf" if viewpoint in ["leaf", "foliar", "single_leaf", "close_up_leaf"] else viewpoint
+        valid_vps = crop_vp_map.get(crop, ["whole_plant", "canopy"])
+        v_mapped = viewpoint
 
         if v_mapped not in valid_vps:
             reason = f"Viewpoint '{viewpoint}' diagnosis is not trained yet for crop '{crop}'."
@@ -228,7 +254,7 @@ class WholePlantRouter:
                 photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
             )
 
-        # 4. Whole-Plant Viewpoint Route
+        # 5. Whole-Plant / Canopy Viewpoint Route
         result = self.predictor.predict(
             image_input=image_input,
             crop_hint=crop,

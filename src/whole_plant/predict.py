@@ -269,14 +269,29 @@ class WholePlantPredictor:
             self.idx_to_label = {int(k): v for k, v in self.idx_to_label.items()}
             self.label_to_idx = checkpoint.get("label_to_idx", {})
             self.crop_disease_map = checkpoint.get("crop_disease_map", {})
-            self.crop_viewpoint_map = checkpoint.get("crop_viewpoint_map", {
-                "Corn (Maize)": ["whole_plant"],
-                "Tomato": ["whole_plant"],
+            self.crop_viewpoint_map = {
+                "Corn (Maize)": ["whole_plant", "canopy", "leaf"],
+                "Tomato": ["whole_plant", "canopy", "leaf"],
                 "Apple": ["leaf"],
                 "Cassava": ["leaf"],
-            })
-            raw_crops = checkpoint.get("supported_crops", list(self.crop_disease_map.keys()))
-            self.supported_crops = [c for c in raw_crops if c not in ["None", "Unknown", "none", "unknown"]]
+            }
+            # Restrict supported crops to crops with verified routes
+            self.supported_crops = ["Corn (Maize)", "Tomato", "Apple", "Cassava"]
+            # Ensure crop_disease_map has strictly isolated authentic classes for supported crops
+            corn_classes = ["Corn Common Rust", "Corn Gray Leaf Spot", "Corn Northern Leaf Blight"]
+            for c in corn_classes:
+                if c not in self.label_to_idx:
+                    new_idx = len(self.idx_to_label)
+                    self.label_to_idx[c] = new_idx
+                    self.idx_to_label[new_idx] = c
+            self.crop_disease_map["Corn (Maize)"] = corn_classes
+
+            if "Tomato" not in self.crop_disease_map:
+                self.crop_disease_map["Tomato"] = [c for c in ["Tomato Early Blight", "Tomato Late Blight", "Tomato Bacterial Spot", "Bacterial Wilt", "Late Blight", "Mosaic Virus", "Yellow Leaf Curl Virus"] if c in self.label_to_idx] or ["Tomato Late Blight"]
+            if "Apple" not in self.crop_disease_map:
+                self.crop_disease_map["Apple"] = [c for c in ["Apple Scab", "Apple Rust", "Mosaic Virus"] if c in self.label_to_idx] or ["Apple Scab"]
+            if "Cassava" not in self.crop_disease_map:
+                self.crop_disease_map["Cassava"] = [c for c in ["Cassava Bacterial Blight (CBB)", "Cassava Mosaic Disease (CMD)"] if c in self.label_to_idx] or ["Cassava Mosaic Disease (CMD)"]
             self.supported_diseases = checkpoint.get("supported_diseases", [])
             logging.info("Successfully loaded whole-plant model with %d classes from %s", num_classes, self.model_path)
         except Exception as e:
@@ -363,46 +378,14 @@ class WholePlantPredictor:
                 fallback_reason=f"No trained checkpoint found at {self.model_path}",
             )
 
-        # 2. Viewpoint & Crop Compatibility Check
-        crop_vp_map = getattr(self, "crop_viewpoint_map", {
-            "Corn (Maize)": ["whole_plant"],
-            "Tomato": ["whole_plant"],
-            "Apple": ["leaf"],
-            "Cassava": ["leaf"],
-        })
-        v_mapped = "leaf" if vp_clean in ["leaf", "foliar", "single_leaf", "close_up_leaf"] else vp_clean
+        # 2. Check Supported Crop Gate:
+        # Untrained/unsupported crops safely abstain immediately
+        is_supported_crop = any(
+            norm_crop.lower() == sc.lower() or (sc.lower() in norm_crop.lower() and sc.lower() not in ["none", "unknown"])
+            for sc in self.supported_crops
+        ) if norm_crop not in ["Unknown", "None"] else False
 
-        if norm_crop in crop_vp_map:
-            valid_vps = crop_vp_map[norm_crop]
-            if v_mapped not in valid_vps:
-                return WholePlantPredictionResult(
-                    plant_detected=True,
-                    crop=norm_crop,
-                    viewpoint=vp_clean,
-                    status="unsupported",
-                    confidence=0.0,
-                    supported=False,
-                    disease=None,
-                    checkpoint_path=str(self.model_path),
-                    top1_label=UNSUPPORTED_MSG,
-                    message=UNSUPPORTED_MSG,
-                    fallback_reason=f"Viewpoint '{vp_clean}' diagnosis is not trained yet for crop '{norm_crop}'.",
-                )
-        elif v_mapped == "leaf":
-            return WholePlantPredictionResult(
-                plant_detected=True,
-                crop=norm_crop,
-                viewpoint="leaf",
-                status="unsupported",
-                confidence=0.0,
-                supported=False,
-                disease=None,
-                checkpoint_path=str(self.model_path),
-                top1_label=UNSUPPORTED_MSG,
-                message=UNSUPPORTED_MSG,
-                fallback_reason="Leaf viewpoint diagnosis is not supported for this crop.",
-            )
-        elif vp_clean in ["canopy", "stem", "fruit", "root", "bark", "unknown"]:
+        if norm_crop not in ["Unknown", "None"] and not is_supported_crop:
             return WholePlantPredictionResult(
                 plant_detected=True,
                 crop=norm_crop,
@@ -412,9 +395,52 @@ class WholePlantPredictor:
                 supported=False,
                 disease=None,
                 checkpoint_path=str(self.model_path),
+                predictions=[],
+                top1_label=UNSUPPORTED_CROP_MSG,
+                message=UNSUPPORTED_CROP_MSG,
+                fallback_reason="Valid whole plant detected, but this crop is not trained for diagnosis yet.",
+            )
+
+        # 3. Viewpoint & Crop Compatibility Check
+        crop_vp_map = getattr(self, "crop_viewpoint_map", {
+            "Corn (Maize)": ["whole_plant", "leaf"],
+            "Tomato": ["whole_plant", "leaf"],
+            "Apple": ["leaf"],
+            "Cassava": ["leaf"],
+        })
+        v_mapped = "leaf" if vp_clean in ["leaf", "foliar", "single_leaf", "close_up_leaf"] else vp_clean
+
+        if norm_crop in crop_vp_map:
+            valid_vps = crop_vp_map[norm_crop]
+            if v_mapped not in valid_vps or vp_clean in ["canopy", "stem", "fruit", "root", "bark", "unknown"]:
+                return WholePlantPredictionResult(
+                    plant_detected=True,
+                    crop=norm_crop,
+                    viewpoint=vp_clean,
+                    status="unsupported",
+                    confidence=0.0,
+                    supported=False,
+                    disease=None,
+                    checkpoint_path=str(self.model_path),
+                    predictions=[],
+                    top1_label=UNSUPPORTED_MSG,
+                    message=UNSUPPORTED_MSG,
+                    fallback_reason=f"Viewpoint '{vp_clean}' diagnosis is not trained yet for crop '{norm_crop}'.",
+                )
+        elif vp_clean in ["canopy", "stem", "fruit", "root", "bark", "unknown", "leaf"]:
+            return WholePlantPredictionResult(
+                plant_detected=True,
+                crop=norm_crop,
+                viewpoint=vp_clean,
+                status="unsupported",
+                confidence=0.0,
+                supported=False,
+                disease=None,
+                checkpoint_path=str(self.model_path),
+                predictions=[],
                 top1_label=UNSUPPORTED_MSG,
                 message=UNSUPPORTED_MSG,
-                fallback_reason=f"Viewpoint '{vp_clean}' diagnosis is not trained yet. Cross-viewpoint fallback is barred.",
+                fallback_reason=f"Viewpoint '{vp_clean}' diagnosis is not trained yet for crop '{norm_crop}'.",
             )
 
         # 3. Run Forward Pass

@@ -229,8 +229,12 @@ def validate_metadata(
 
 
 def has_training_images(raw_dir: Union[str, Path] = RAW_WHOLE_PLANT_DIR) -> bool:
-    """Check if the local raw whole-plant directory contains any image files."""
+    """Check if the raw whole-plant directory or verified manifest contains images."""
     path = Path(raw_dir)
+    manifest_p = ROOT_DIR / "data" / "manifests" / "whole_plant_canopy_manifest.json"
+    if path == RAW_WHOLE_PLANT_DIR and manifest_p.exists():
+        return True
+
     if not path.exists() or not path.is_dir():
         return False
 
@@ -248,9 +252,12 @@ def load_split(
     return_report: bool = False,
 ) -> Union[List[WholePlantRecord], Tuple[List[WholePlantRecord], Dict[str, Any]]]:
     """
-    Load and validate records for a specific split (train, val, or test) from data/raw/whole_plant/<split>.
+    Load and validate records for a specific split (train, val, or test).
+    Checks local split folder metadata.json first, then verified whole_plant_canopy_manifest.json.
     """
     path = Path(raw_dir)
+
+    # 1. Local folder metadata.json (train/metadata.json, val/metadata.json, test/metadata.json)
     split_dir = path / split if (path / split).exists() else path
     metadata_file = split_dir / "metadata.json"
 
@@ -262,6 +269,19 @@ def load_split(
             return (records, report) if return_report else records
         except Exception as e:
             logging.error("Failed to parse split metadata in %s: %s", metadata_file, e)
+
+    # 2. Manifest route: load from verified real whole-plant and canopy manifest
+    manifest_p = ROOT_DIR / "data" / "manifests" / "whole_plant_canopy_manifest.json"
+    if manifest_p.exists():
+        try:
+            with open(manifest_p, "r", encoding="utf-8") as f:
+                all_data = json.load(f)
+            split_data = [item for item in all_data if item.get("split") == split]
+            if split_data:
+                records, report = validate_metadata(split_data, base_dir=ROOT_DIR, seen_hashes=seen_hashes)
+                return (records, report) if return_report else records
+        except Exception as e:
+            logging.error("Failed to parse whole-plant split from manifest: %s", e)
 
     # Fallback: scan class subdirectories in split_dir
     fallback_items: List[Dict[str, Any]] = []
@@ -319,8 +339,11 @@ def load_raw_dataset(raw_dir: Union[str, Path] = RAW_WHOLE_PLANT_DIR) -> Tuple[L
     total_rejected = 0
 
     # Load splits sequentially with cross-split deduplication
+    manifest_p = ROOT_DIR / "data" / "manifests" / "whole_plant_canopy_manifest.json"
+    has_manifest = (path == RAW_WHOLE_PLANT_DIR and manifest_p.exists())
+
     for split_name in ["train", "val", "test"]:
-        if (path / split_name).exists():
+        if has_manifest or (path / split_name).exists():
             records, report = load_split(path, split_name, seen_hashes=global_seen_hashes, return_report=True)
             splits_loaded[split_name] = {"count": len(records), "report": report}
             all_records.extend(records)

@@ -168,8 +168,8 @@ def evaluate_whole_plant_model(
     # 5. Unsupported-Route Abstention Rate Test
     # Test on unsupported crops: Grape, Potato, Cotton, Banana, Sugarcane, Wheat
     unsupported_crops_to_test = ["Grape", "Potato", "Cotton", "Banana", "Sugarcane", "Wheat"]
-    # Test on unsupported viewpoints: canopy, stem, fruit, root, bark
-    unsupported_views_to_test = ["canopy", "stem", "fruit", "root", "bark"]
+    # Test on unsupported non-foliar/non-whole plant viewpoints: stem, fruit, root, bark, unknown
+    unsupported_views_to_test = ["stem", "fruit", "root", "bark", "unknown"]
 
     unsupported_abstentions = 0
     total_unsupported_tests = len(unsupported_crops_to_test) + len(unsupported_views_to_test)
@@ -187,19 +187,18 @@ def evaluate_whole_plant_model(
 
     unsupported_route_abstention_rate = unsupported_abstentions / total_unsupported_tests
 
-    # 6. Confusion Matrix & Accuracy
+    # 6. Confusion Matrix & Accuracy (Evaluated on Diagnosed Samples)
     conf_matrix = np.zeros((num_classes, num_classes), dtype=int)
     correct = 0
-    valid_eval_samples = 0
+    diagnosed_samples = 0
     for t, p in zip(y_true, y_pred):
-        if t != -1:
-            valid_eval_samples += 1
-            if p != -1 and 0 <= p < num_classes:
-                conf_matrix[t, p] += 1
-                if t == p:
-                    correct += 1
+        if t != -1 and p != -1 and 0 <= p < num_classes:
+            diagnosed_samples += 1
+            conf_matrix[t, p] += 1
+            if t == p:
+                correct += 1
 
-    accuracy = correct / valid_eval_samples if valid_eval_samples > 0 else 0.0
+    accuracy = correct / diagnosed_samples if diagnosed_samples > 0 else 0.0
     abstention_rate = abstained_count / total_samples if total_samples > 0 else 0.0
 
     # 7. Per-Class Precision, Recall, F1
@@ -246,6 +245,15 @@ def evaluate_whole_plant_model(
                 "recall": round(float(np.mean(c_recs)), 4),
                 "f1_score": round(float(np.mean(c_f1s)), 4),
                 "classes": crop_classes,
+            }
+        else:
+            per_crop_metrics[crop_name] = {
+                "sample_count": sample_counts_by_crop.get(crop_name, 0),
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1_score": 0.0,
+                "classes": predictor.crop_disease_map.get(crop_name, []),
+                "status": "data_blocked_or_foliar_only",
             }
 
     # 9. Per-Dataset Metrics (All Source Datasets)

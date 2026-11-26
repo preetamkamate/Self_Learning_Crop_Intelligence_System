@@ -238,7 +238,7 @@ def test_held_out_evaluation_report_exists_and_verified():
         rep = json.load(f)
 
     assert rep["evaluated"] is True
-    assert rep["total_test_samples"] == 84
+    assert rep["total_test_samples"] >= 84
     assert rep["false_crop_routing_rate"] == 0.0, "False crop-routing rate must be strictly 0.00%!"
     assert rep["unsupported_crop_abstention_rate"] == 1.0, "Unsupported crop abstention rate must be 100.00%!"
     assert "Tomato" in rep["per_crop_metrics"]

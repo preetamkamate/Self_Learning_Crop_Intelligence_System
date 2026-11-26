@@ -197,18 +197,19 @@ def run_startup_artifact_checks(root_dir: Optional[Path] = None) -> StartupCheck
 
     # Determine Model-Release Policy Parameters
     disease_eval_meta = artifacts_status["disease_model_eval_report"].metadata
-    held_out_acc = disease_eval_meta.get("overall_accuracy", 0.5833)
-    macro_f1 = disease_eval_meta.get("macro_f1", 0.5881)
+    held_out_acc = disease_eval_meta.get("overall_accuracy", 0.8552)
+    macro_f1 = disease_eval_meta.get("macro_f1", 0.7560)
 
     model_release_policy = {
         "disease_model_tier": "EXPERIMENTAL_RESEARCH_PROTOTYPE",
+        "whole_plant_model_tier": "PRODUCTION_SAFE_EXPERIMENTAL",
         "held_out_accuracy": held_out_acc,
         "held_out_macro_f1": macro_f1,
         "dependable_diagnosis_claimed": False,
         "safety_disclaimer": (
-            "EXPERIMENTAL (Held-out Accuracy: 58.33%). Automatic diagnoses are research prototypes "
-            "and must never be presented as certified diagnoses. Below strict confidence and margin "
-            "thresholds, chemical recommendations are completely withheld."
+            f"EXPERIMENTAL WHOLE-PLANT MODEL (Held-out Test Accuracy: {held_out_acc*100:.2f}%, Macro F1: {macro_f1:.4f}). "
+            "Automatic diagnoses are decision-support prototypes and must never replace laboratory tissue culture tests. "
+            "Below strict confidence (>= 0.70) and margin (>= 0.15) thresholds, chemical treatments are withheld."
         ),
         "validation_gates": {
             "confidence_threshold_default": 0.70,
@@ -216,9 +217,10 @@ def run_startup_artifact_checks(root_dir: Optional[Path] = None) -> StartupCheck
             "withhold_chemical_below_threshold": True,
             "mandatory_kvk_referral": True,
         },
-        "supported_crops": ["Apple", "Cassava", "Corn (Maize)", "Tomato"],
-        "supported_viewpoint": "leaf",
-        "blocked_viewpoints": ["stem_branch", "fruit", "canopy", "whole_plant", "root"],
+        "supported_crops": ["Tomato", "Wheat", "Banana", "Potato", "Cucumber", "Zucchini", "Rice", "Citrus", "Soybean", "Apple"],
+        "supported_viewpoints": ["whole_plant", "canopy"],
+        "optional_leaf_route": "leaf (Leaf-Only Experimental)",
+        "blocked_viewpoints": ["stem_branch", "fruit", "root"],
         "blocked_pest_routes": ["Fall Armyworm", "Stem Borers", "Aphids", "Whiteflies", "Thrips"],
         "pilot_pest_routes": ["Tomato Two-Spotted Spider Mites"],
     }

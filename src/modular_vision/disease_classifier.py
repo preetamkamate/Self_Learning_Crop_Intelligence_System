@@ -96,7 +96,7 @@ class ModularDiseaseClassifier:
         self,
         image_input: Union[Image.Image, Path, str, bytes],
         crop: str,
-        confidence_threshold: float = 0.40,
+        confidence_threshold: float = 0.25,
     ) -> DiseaseClassificationResult:
         """
         Diagnose foliar (leaf) pathology using verified real labeled model.

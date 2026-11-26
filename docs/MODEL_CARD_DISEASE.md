@@ -1,9 +1,10 @@
-# Model Card: Foliar & Whole-Plant Crop Disease Classifier
+# Model Card: Optional Leaf-Only Experimental Pathology Classifier
 
 ## 1. Model Details
-- **Model Identifier**: `models/whole_plant/model.pt`
-- **Release Tier**: `EXPERIMENTAL_RESEARCH_PROTOTYPE`
+- **Model Identifier**: `models/whole_plant/model.pt` (Foliar Mode)
+- **Feature Status**: **Separate Optional Leaf-Only Experimental Feature**
 - **Architecture**: Deep Convolutional Neural Network with Adaptive Average Pooling and Conditional Subspace Softmax Normalization
+- **Strict Boundary**: This foliar model is **never** used as a fallback for whole-plant, canopy, stem, fruit, or root photos.
 - **Input Resolution**: 224x224 RGB image
 - **Output Classes**: 14 authentic agricultural pathology classes (Apple, Cassava, Corn, Tomato)
 - **Framework**: PyTorch (`mps` / `cuda` / `cpu`)
@@ -17,8 +18,8 @@
   - Viewpoint: **Foliar (`leaf`) close-ups** only
 - **Out-of-Scope & Prohibited Use**:
   - Never use as a standalone, certified, or legally dependable laboratory diagnosis.
-  - Never apply to non-leaf organs (`stem_branch`, `fruit`, `canopy`, `whole_plant`, `root`).
-  - Never apply to untrained crop species (Grape, Potato, Citrus, Rice, Wheat, etc.).
+  - Never apply as a fallback for whole-plant, canopy, stem, fruit, or root photos.
+  - Never apply to untrained crop species (Grape, Potato, Cotton, Banana, Sugarcane, Wheat, etc.).
 
 ---
 

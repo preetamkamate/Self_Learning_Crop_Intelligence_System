@@ -336,19 +336,19 @@ with tab_home:
 
     with g_col2:
         viewpoint_options = [
+            "Whole Plant (Active Primary Diagnosis)",
+            "Canopy / Field View (Data-Blocked)",
+            "Leaf (Optional Leaf-Only Experimental)",
+            "Stem / Branch (Data-Blocked - Guidance Only)",
+            "Fruit / Pod / Ear (Data-Blocked - Guidance Only)",
+            "Root / Tuber (Data-Blocked - Guidance Only)",
             "Auto-detect",
-            "Leaf (Foliar)",
-            "Stem / Branch (Data-Blocked)",
-            "Fruit (Data-Blocked)",
-            "Canopy / Field (Data-Blocked)",
-            "Whole Plant (Data-Blocked)",
-            "Root / Tuber (Data-Blocked)",
         ]
         sel_viewpoint = st.selectbox(
             "Anatomical Viewpoint:",
             viewpoint_options,
             index=0,
-            help="Only foliar leaf views are supported with verified data. All other 5 viewpoints safely abstain.",
+            help="Whole-plant diagnosis is the active primary route for Corn and Tomato. Leaf diagnosis is a separate optional experimental feature.",
         )
 
     with g_col3:
@@ -434,7 +434,20 @@ with tab_home:
 
                 # Parse clean hints
                 crop_hint_clean = sel_crop.split(" (")[0] if sel_crop != "Auto-detect" else None
-                viewpoint_hint_clean = sel_viewpoint.split(" (")[0].lower() if sel_viewpoint != "Auto-detect" else None
+                if "Whole Plant" in sel_viewpoint:
+                    viewpoint_hint_clean = "whole_plant"
+                elif "Canopy" in sel_viewpoint:
+                    viewpoint_hint_clean = "canopy"
+                elif "Leaf" in sel_viewpoint:
+                    viewpoint_hint_clean = "leaf"
+                elif "Stem" in sel_viewpoint:
+                    viewpoint_hint_clean = "stem_branch"
+                elif "Fruit" in sel_viewpoint:
+                    viewpoint_hint_clean = "fruit"
+                elif "Root" in sel_viewpoint:
+                    viewpoint_hint_clean = "root"
+                else:
+                    viewpoint_hint_clean = None
 
                 # Call Autonomous Router
                 query_text = user_symptom_inquiry or sample_image_label or "Analyze this crop image for diseases or pests."
@@ -612,11 +625,11 @@ with tab_coverage:
     # Coverage Matrix Table
     st.markdown("### 1. Operational Route Matrix")
     matrix_data = [
-        {"Organ / Viewpoint": "Leaf (Foliar)", "Apple": "✅ Experimental (58.3%)", "Cassava": "✅ Experimental (58.3%)", "Corn (Maize)": "✅ Experimental (58.3%)", "Tomato": "✅ Experimental (58.3%)", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Whole Plant", "Apple": "🛑 Data-Blocked (Foliar Only)", "Cassava": "🛑 Data-Blocked (Foliar Only)", "Corn (Maize)": "✅ Active Primary Diagnosis", "Tomato": "✅ Active Primary Diagnosis", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Canopy / Field", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Leaf (Foliar)", "Apple": "✅ Leaf-Only Experimental", "Cassava": "✅ Leaf-Only Experimental", "Corn (Maize)": "✅ Leaf-Only Experimental", "Tomato": "✅ Leaf-Only Experimental", "Other Crops": "🛑 Data-Blocked"},
         {"Organ / Viewpoint": "Stem / Branch", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
         {"Organ / Viewpoint": "Fruit / Pod", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Canopy / Field", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Whole Plant", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
         {"Organ / Viewpoint": "Root / Tuber", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
         {"Organ / Viewpoint": "Pests (Spider Mites)", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "✅ Pilot (100.0%)", "Other Crops": "🛑 Data-Blocked"},
         {"Organ / Viewpoint": "Pests (Armyworm/Borer)", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
@@ -750,7 +763,17 @@ with tab_audit:
 
     # Model Cards Viewer
     st.markdown("### 3. Official Model Cards")
-    mc_tab1, mc_tab2, mc_tab3 = st.tabs(["Foliar Pathology Model Card", "Pest Detection CNN Model Card", "Model Release Policy"])
+    mc_tab0, mc_tab1, mc_tab2, mc_tab3 = st.tabs([
+        "Whole-Plant & Canopy Model Card",
+        "Optional Leaf-Only Model Card",
+        "Pest Detection CNN Model Card",
+        "Model Release Policy",
+    ])
+
+    with mc_tab0:
+        doc_p0 = ROOT_DIR / "docs" / "MODEL_CARD_WHOLE_PLANT.md"
+        if doc_p0.exists():
+            st.markdown(doc_p0.read_text(encoding="utf-8"))
 
     with mc_tab1:
         doc_p = ROOT_DIR / "docs" / "MODEL_CARD_DISEASE.md"
