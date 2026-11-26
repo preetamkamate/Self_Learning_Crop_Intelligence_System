@@ -37,8 +37,14 @@ WMO_DESCRIPTIONS = {
 class WeatherService:
     """Fetches real-time weather and generates spray suitability advisories."""
 
-    def __init__(self, base_url: str = config.OPEN_METEO_BASE_URL):
+    def __init__(
+        self,
+        base_url: str = config.OPEN_METEO_BASE_URL,
+        service_mode: Optional[str] = None,
+    ):
         self.base_url = base_url
+        import os
+        self.service_mode = service_mode or os.getenv("WEATHER_SERVICE_MODE", "offline_local")
 
     def get_weather(
         self,
@@ -47,8 +53,14 @@ class WeatherService:
         lon: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Fetch real-time weather and 3-day forecast from Open-Meteo.
+        Fetch weather intelligence.
+        Supports keyless offline climatological mode (zero external calls)
+        and live mode with safe offline fallback.
         """
+        if self.service_mode == "offline_local":
+            from src.location.service import AgroLocationService
+            loc_service = AgroLocationService()
+            return loc_service.get_weather(district_or_city, force_offline=True)
         # Determine coordinates
         if lat is None or lon is None:
             coords = config.DISTRICT_COORDINATES.get(
@@ -152,27 +164,10 @@ class WeatherService:
             }
 
         except Exception as e:
-            logging.warning("Weather fetch failed: %s. Using climatological fallback.", e)
-            return {
-                "status": "fallback",
-                "district": district_or_city,
-                "latitude": lat,
-                "longitude": lon,
-                "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M"),
-                "temperature_c": 26.5,
-                "humidity_pct": 70.0,
-                "apparent_temperature_c": 27.0,
-                "precipitation_mm": 0.0,
-                "wind_speed_kmh": 6.5,
-                "condition_en": "Partly Cloudy (Fallback)",
-                "condition_kn": "ಭಾಗಶಃ ಮೋಡ (ಹಿನ್ನೆಲೆ)",
-                "today_rain_prob_pct": 20,
-                "today_rain_sum_mm": 0.0,
-                "spray_safe": True,
-                "spray_advisory_en": "Normal spraying conditions (Offline mode). Check skies before spraying.",
-                "spray_advisory_kn": "ಸಾಮಾನ್ಯ ಸಿಂಪಡಣಾ ವಾತಾವರಣ (ಆಫ್‌ಲೈನ್ ಮೋಡ್).",
-                "daily_forecast": {},
-            }
+            logging.info("Live weather API call deferred or failed: %s. Using keyless offline climatological model.", e)
+            from src.location.service import AgroLocationService
+            loc_service = AgroLocationService()
+            return loc_service.get_weather(district_or_city, force_offline=True)
 
 
 if __name__ == "__main__":

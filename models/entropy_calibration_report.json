@@ -117,7 +117,7 @@
   ],
   "sample_evaluations": [
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_tomato_healthy.jpg",
+      "path": "data/raw/sample_tomato_healthy.jpg",
       "desc": "Tomato Healthy Leaf",
       "expected_cat": "healthy",
       "is_valid_plant": true,
@@ -130,7 +130,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_apple_scab.jpg",
+      "path": "data/raw/sample_apple_scab.jpg",
       "desc": "Apple Scab Leaf",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -143,7 +143,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_corn_common_rust.jpg",
+      "path": "data/raw/sample_corn_common_rust.jpg",
       "desc": "Corn Common Rust Leaf",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -156,7 +156,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_tomato_early_blight.jpg",
+      "path": "data/raw/sample_tomato_early_blight.jpg",
       "desc": "Tomato Early Blight Leaf",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -169,7 +169,7 @@
       "agreed_quadrants": 1
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_field_tomato_plant.jpg",
+      "path": "data/raw/sample_field_tomato_plant.jpg",
       "desc": "Field Tomato Whole-Plant",
       "expected_cat": "whole_plant",
       "is_valid_plant": true,
@@ -182,7 +182,7 @@
       "agreed_quadrants": 3
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Apple___Apple_scab.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Apple___Apple_scab.jpg",
       "desc": "Benchmark: Apple___Apple_scab",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -195,7 +195,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Apple___Black_rot.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Apple___Black_rot.jpg",
       "desc": "Benchmark: Apple___Black_rot",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -208,7 +208,7 @@
       "agreed_quadrants": 1
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Apple___Cedar_apple_rust.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Apple___Cedar_apple_rust.jpg",
       "desc": "Benchmark: Apple___Cedar_apple_rust",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -221,7 +221,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Apple___healthy.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Apple___healthy.jpg",
       "desc": "Benchmark: Apple___healthy",
       "expected_cat": "healthy",
       "is_valid_plant": true,
@@ -234,7 +234,7 @@
       "agreed_quadrants": 3
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Corn_(maize)___Common_rust_.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Corn_(maize)___Common_rust_.jpg",
       "desc": "Benchmark: Corn_(maize)___Common_rust_",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -247,7 +247,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/in_distribution/Corn_(maize)___Northern_Leaf_Blight.jpg",
+      "path": "data/processed/eval_samples/in_distribution/Corn_(maize)___Northern_Leaf_Blight.jpg",
       "desc": "Benchmark: Corn_(maize)___Northern_Leaf_Blight",
       "expected_cat": "disease",
       "is_valid_plant": true,
@@ -260,7 +260,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/multi_part/canopy/canopy_tomato_field.jpg",
+      "path": "data/processed/eval_samples/multi_part/canopy/canopy_tomato_field.jpg",
       "desc": "Multi-part canopy: canopy_tomato_field.jpg",
       "expected_cat": "canopy",
       "is_valid_plant": true,
@@ -273,7 +273,7 @@
       "agreed_quadrants": 3
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/multi_part/stem/stem_lower_base.jpg",
+      "path": "data/processed/eval_samples/multi_part/stem/stem_lower_base.jpg",
       "desc": "Multi-part stem: stem_lower_base.jpg",
       "expected_cat": "stem",
       "is_valid_plant": true,
@@ -286,7 +286,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/multi_part/fruit/fruit_specimen.jpg",
+      "path": "data/processed/eval_samples/multi_part/fruit/fruit_specimen.jpg",
       "desc": "Multi-part fruit: fruit_specimen.jpg",
       "expected_cat": "fruit",
       "is_valid_plant": true,
@@ -299,7 +299,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/sample_blurred_leaf.jpg",
+      "path": "data/processed/eval_samples/sample_blurred_leaf.jpg",
       "desc": "Severely Blurred Leaf (Insufficient Quality)",
       "expected_cat": "blurry",
       "is_valid_plant": true,
@@ -312,7 +312,7 @@
       "agreed_quadrants": 2
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/raw/sample_non_plant_cat.png",
+      "path": "data/raw/sample_non_plant_cat.png",
       "desc": "OOD: Cat Photograph",
       "expected_cat": "ood",
       "is_valid_plant": false,
@@ -325,7 +325,7 @@
       "agreed_quadrants": 0
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/ood/ood_checkerboard.jpg",
+      "path": "data/processed/eval_samples/ood/ood_checkerboard.jpg",
       "desc": "OOD: Checkerboard Pattern",
       "expected_cat": "ood",
       "is_valid_plant": false,
@@ -338,7 +338,7 @@
       "agreed_quadrants": 4
     },
     {
-      "path": "/Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/data/processed/eval_samples/ood/ood_gaussian_noise.jpg",
+      "path": "data/processed/eval_samples/ood/ood_gaussian_noise.jpg",
       "desc": "OOD: Gaussian Noise",
       "expected_cat": "ood",
       "is_valid_plant": false,

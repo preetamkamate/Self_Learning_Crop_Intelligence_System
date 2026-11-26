@@ -395,10 +395,10 @@ def generate_markdown_audit(report: Dict[str, Any], output_path: Path):
     lines.extend([
         "",
         "### Deprecated Synthetic Diagrams Archive Status",
-        f"- **Quarantine Location**: [`archive/deprecated_synthetic_diagrams/`](file:///Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/archive/deprecated_synthetic_diagrams)",
+        "- **Quarantine Location**: [`archive/deprecated_synthetic_diagrams/`](archive/deprecated_synthetic_diagrams)",
         f"- **Deprecated File Count**: `{report['deprecated_synthetic_archive'].get('total_deprecated_files', 0)}` files across 9 classes",
         "- **Forensic Reason**: `colors < 10,000` (1,279 to 8,677), `laplacian_var < 90` (22.3 to 87.5), procedural geometric shapes (`ImageDraw.Draw` rectangles, ellipses, polygon fills).",
-        "- **Notice**: Documented in [`archive/deprecated_synthetic_diagrams/DEPRECATION_NOTICE.md`](file:///Users/preetamkamate/.gemini/antigravity/scratch/crop_intelligence_system/archive/deprecated_synthetic_diagrams/DEPRECATION_NOTICE.md).",
+        "- **Notice**: Documented in [`archive/deprecated_synthetic_diagrams/DEPRECATION_NOTICE.md`](archive/deprecated_synthetic_diagrams/DEPRECATION_NOTICE.md).",
         "",
         "---",
         "",

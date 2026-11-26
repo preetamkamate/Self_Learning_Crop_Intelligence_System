@@ -41,6 +41,10 @@ class DiseaseClassificationResult:
     source_evidence: Optional[Dict[str, Any]] = None
     photo_guidance: Optional[Dict[str, Any]] = None
     is_healthy: bool = False
+    margin: float = 0.0
+    chemical_treatment_withheld: bool = False
+    model_release_tier: str = "EXPERIMENTAL (58.33% Held-Out Accuracy)"
+    is_experimental: bool = True
     debug_info: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -58,6 +62,10 @@ class DiseaseClassificationResult:
             "source_evidence": self.source_evidence,
             "photo_guidance": self.photo_guidance,
             "is_healthy": self.is_healthy,
+            "margin": self.margin,
+            "chemical_treatment_withheld": self.chemical_treatment_withheld,
+            "model_release_tier": self.model_release_tier,
+            "is_experimental": self.is_experimental,
             "debug_info": self.debug_info,
         }
 
@@ -151,6 +159,10 @@ class ModularDiseaseClassifier:
             source_evidence=pred_res.source_evidence,
             photo_guidance=None if pred_res.supported else get_photo_guidance(viewpoint="leaf", crop=crop),
             is_healthy=(pred_res.status == "healthy"),
+            margin=getattr(pred_res, "margin", 0.0),
+            chemical_treatment_withheld=getattr(pred_res, "chemical_treatment_withheld", False),
+            model_release_tier=getattr(pred_res, "model_release_tier", "EXPERIMENTAL (58.33% Held-Out Accuracy)"),
+            is_experimental=getattr(pred_res, "is_experimental", True),
             debug_info=pred_res.debug_info,
         )
 

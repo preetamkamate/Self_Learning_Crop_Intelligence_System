@@ -45,6 +45,10 @@ class ModularVisionResult:
     photo_guidance: Optional[Dict[str, Any]] = None
     source_evidence: Optional[Dict[str, Any]] = None
     is_healthy: bool = False
+    margin: float = 0.0
+    chemical_treatment_withheld: bool = False
+    model_release_tier: str = "EXPERIMENTAL (58.33% Held-Out Accuracy)"
+    is_experimental: bool = True
     debug_info: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -70,6 +74,10 @@ class ModularVisionResult:
             "photo_guidance": self.photo_guidance,
             "source_evidence": self.source_evidence,
             "is_healthy": self.is_healthy,
+            "margin": self.margin,
+            "chemical_treatment_withheld": self.chemical_treatment_withheld,
+            "model_release_tier": self.model_release_tier,
+            "is_experimental": self.is_experimental,
             "debug_info": {
                 "crop_route": self.crop,
                 "viewpoint_route": self.viewpoint,
@@ -79,6 +87,9 @@ class ModularVisionResult:
                 "fallback_reason": self.fallback_reason,
                 "disease": self.disease,
                 "status": self.status,
+                "margin": self.margin,
+                "chemical_treatment_withheld": self.chemical_treatment_withheld,
+                "model_release_tier": self.model_release_tier,
                 **self.debug_info,
             },
         }
@@ -231,6 +242,10 @@ class ModularCropVisionPipeline:
                 source_evidence=leaf_res.source_evidence,
                 photo_guidance=leaf_res.photo_guidance,
                 is_healthy=leaf_res.is_healthy,
+                margin=getattr(leaf_res, "margin", 0.0),
+                chemical_treatment_withheld=getattr(leaf_res, "chemical_treatment_withheld", False),
+                model_release_tier=getattr(leaf_res, "model_release_tier", "EXPERIMENTAL (58.33% Held-Out Accuracy)"),
+                is_experimental=getattr(leaf_res, "is_experimental", True),
                 debug_info=leaf_res.debug_info,
             )
 

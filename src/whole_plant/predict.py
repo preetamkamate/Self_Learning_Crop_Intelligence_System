@@ -122,6 +122,7 @@ class WholePlantPredictionResult:
       - status
       - fallback_reason
       - checkpoint_path
+    Plus Model-Release Policy fields (Experimental tier, margin, chemical withholding).
     """
     plant_detected: bool = True
     crop: str = "Unknown"
@@ -140,6 +141,10 @@ class WholePlantPredictionResult:
     model_path: str = str(DEFAULT_MODEL_PATH)
     source_evidence: Optional[Dict[str, Any]] = None
     photo_guidance: Optional[Dict[str, Any]] = None
+    margin: float = 0.0
+    chemical_treatment_withheld: bool = False
+    model_release_tier: str = "EXPERIMENTAL (58.33% Held-Out Accuracy)"
+    is_experimental: bool = True
     debug_info: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -194,6 +199,10 @@ class WholePlantPredictionResult:
         data["is_healthy"] = (self.status == "healthy")
         data["source_evidence"] = self.source_evidence if self.supported else None
         data["photo_guidance"] = self.photo_guidance
+        data["margin"] = self.margin
+        data["chemical_treatment_withheld"] = self.chemical_treatment_withheld
+        data["model_release_tier"] = self.model_release_tier
+        data["is_experimental"] = self.is_experimental
         data["debug_info"] = {
             "crop_route": self.crop,
             "viewpoint_route": self.viewpoint,
@@ -204,6 +213,9 @@ class WholePlantPredictionResult:
             "disease": data["disease"],
             "is_ood": self.is_ood,
             "top1_confidence_pct": data["top1_confidence"],
+            "margin": round(self.margin, 4),
+            "chemical_treatment_withheld": self.chemical_treatment_withheld,
+            "model_release_tier": self.model_release_tier,
             "status": self.status,
             "predicted_class": label_display,
         }
@@ -524,6 +536,9 @@ class WholePlantPredictor:
                 "confidence_percent": round(c_prob * 100, 2),
             })
 
+        top2_prob = float(norm_sub_probs[int(sorted_indices[1])]) if len(sorted_indices) > 1 else 0.0
+        margin = float(top1_prob - top2_prob)
+
         # Confidence Gate
         if top1_prob < confidence_threshold:
             return WholePlantPredictionResult(
@@ -532,6 +547,10 @@ class WholePlantPredictor:
                 viewpoint=vp_clean,
                 status="uncertain",
                 confidence=round(top1_prob, 4),
+                margin=round(margin, 4),
+                chemical_treatment_withheld=True,
+                model_release_tier="EXPERIMENTAL (58.33% Held-Out Accuracy)",
+                is_experimental=True,
                 supported=False,
                 disease=None,
                 checkpoint_path=str(self.model_path),
@@ -541,11 +560,32 @@ class WholePlantPredictor:
                 fallback_reason=f"Top candidate '{top1_class}' confidence {top1_prob*100:.1f}% < threshold {confidence_threshold*100:.1f}%",
             )
 
+        # Model-Release Safety Policy:
+        # Held-out accuracy is 58.33% (Macro F1: 0.5881).
+        # Require high confidence (>= 0.70) and margin (>= 0.15) for chemical recommendations.
+        # Below threshold: withhold chemical treatments completely, label as tentative observation.
+        high_confidence_gate = (top1_prob >= 0.70)
+        high_margin_gate = (margin >= 0.15) if len(sorted_indices) > 1 else True
+        chemical_withheld = not (high_confidence_gate and high_margin_gate)
+
         # Confirmed condition
         is_healthy = ("healthy" in top1_class.lower())
         disease_name = None if is_healthy else top1_class
         status_val = "healthy" if is_healthy else "disease"
         source_evidence = WHOLE_PLANT_AUTHORITATIVE_SOURCES.get(top1_class)
+
+        if source_evidence and chemical_withheld and not is_healthy:
+            source_evidence = dict(source_evidence)
+            source_evidence["management_summary"] = (
+                "⚠️ Tentative observation (Confidence/Margin below strict release threshold). "
+                "Chemical pesticide/fungicide treatments are strictly withheld to prevent crop injury. "
+                "Consult your nearest Krishi Vigyan Kendra (KVK) for physical verification."
+            )
+            source_evidence["chemical_withheld"] = True
+
+        msg = f"Crop diagnosis: {top1_class}" if not is_healthy else f"Healthy {active_crop} ({vp_clean})"
+        if chemical_withheld and not is_healthy:
+            msg += " [Tentative Observation — Chemical Spray Withheld]"
 
         return WholePlantPredictionResult(
             plant_detected=True,
@@ -553,12 +593,16 @@ class WholePlantPredictor:
             viewpoint=vp_clean,
             status=status_val,
             confidence=round(top1_prob, 4),
+            margin=round(margin, 4),
+            chemical_treatment_withheld=chemical_withheld,
+            model_release_tier="EXPERIMENTAL (58.33% Held-Out Accuracy)",
+            is_experimental=True,
             supported=True,
             disease=disease_name,
             checkpoint_path=str(self.model_path),
             predictions=ranked_predictions,
             top1_label=top1_class,
-            message=f"Crop diagnosis: {top1_class}" if not is_healthy else f"Healthy {active_crop} ({vp_clean})",
+            message=msg,
             source_evidence=source_evidence,
-            fallback_reason="",
+            fallback_reason="" if not chemical_withheld else "Diagnostic margin/confidence below release threshold; chemical treatment withheld.",
         )

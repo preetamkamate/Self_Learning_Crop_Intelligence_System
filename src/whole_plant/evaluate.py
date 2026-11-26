@@ -248,6 +248,33 @@ def evaluate_whole_plant_model(
                 "classes": crop_classes,
             }
 
+    # 9. Per-Dataset Metrics (All Source Datasets)
+    crop_to_dataset = {
+        "Apple": "plant-pathology-2021-fgvc8",
+        "Cassava": "cassava-leaf-disease-classification",
+        "Corn (Maize)": "PlantVillage-Dataset-master",
+        "Tomato": "PlantVillage-Dataset-master",
+    }
+    per_dataset_metrics: Dict[str, Dict[str, Any]] = {}
+    for ds_name in ["plant-pathology-2021-fgvc8", "cassava-leaf-disease-classification", "PlantVillage-Dataset-master"]:
+        ds_crops = [c for c, ds in crop_to_dataset.items() if ds == ds_name]
+        ds_classes = []
+        for c in ds_crops:
+            ds_classes.extend([cls for cls in predictor.crop_disease_map.get(c, []) if cls in class_to_idx])
+        ds_samples = sum(sample_counts_by_crop.get(c, 0) for c in ds_crops)
+        ds_precs = [precision_per_class.get(cls, 0.0) for cls in ds_classes]
+        ds_recs = [recall_per_class.get(cls, 0.0) for cls in ds_classes]
+        ds_f1s = [f1_per_class.get(cls, 0.0) for cls in ds_classes]
+        per_dataset_metrics[ds_name] = {
+            "source_dataset": ds_name,
+            "sample_count": ds_samples,
+            "macro_precision": round(float(np.mean(ds_precs)), 4) if ds_precs else 0.0,
+            "macro_recall": round(float(np.mean(ds_recs)), 4) if ds_recs else 0.0,
+            "macro_f1": round(float(np.mean(ds_f1s)), 4) if ds_f1s else 0.0,
+            "crops": ds_crops,
+            "classes": ds_classes,
+        }
+
     report = {
         "status": "success",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -269,6 +296,7 @@ def evaluate_whole_plant_model(
         "sample_counts_per_crop": sample_counts_by_crop,
         "sample_counts_per_class": sample_counts_by_label,
         "per_crop_metrics": per_crop_metrics,
+        "per_dataset_metrics": per_dataset_metrics,
         "per_class_precision": precision_per_class,
         "per_class_recall": recall_per_class,
         "per_class_f1": f1_per_class,

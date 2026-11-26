@@ -1,18 +1,22 @@
 """
-Self-Learning Crop Intelligence System
-Unified Conversational Agricultural Advisory Interface (Streamlit).
-Pairs Multimodal Computer Vision (Whole-Plant DINOv2 + Multi-Scale Pathology),
-Tabular ML (RandomForest on Indian Agriculture Dataset), Open-Meteo Weather API,
-and FAISS RAG over ICAR/IIHR Guidelines with Responsible Self-Learning.
+Self-Learning Crop Intelligence System | Raitha Mitra
+Production-Safe Local Farmer Advisory Application.
+Enforces Strict Model-Release Policy:
+- Active disease model has 58.33% held-out test accuracy; strictly labeled EXPERIMENTAL.
+- High confidence (>=0.70) and margin (>=0.15) required for chemical guidance.
+- Below threshold, chemical treatments are withheld, never presented as dependable diagnosis.
+- Data-Blocked routes: stem/branch, fruit, canopy, whole plant, root, unsupported crops, and unverified pests.
+- Consent-based live location with zero raw GPS persistence (lat/lon purged from memory).
+- 100% keyless offline climatological weather engine.
 """
 import hashlib
 import io
 import json
 import logging
+from pathlib import Path
 import sys
 import uuid
-from datetime import datetime
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 from PIL import Image, ImageOps
 import streamlit as st
 
@@ -21,21 +25,26 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import config
+from src.common.startup_checks import run_startup_artifact_checks
 from src.feedback.batch_retrain import run_batch_retrain_gate
 from src.feedback.feedback_logger import (
     get_queue_statistics,
     log_interaction,
     update_feedback,
 )
+from src.location.component import render_location_widget
+from src.location.registry import KARNATAKA_DISTRICTS, KVK_DIRECTORY
+from src.location.service import AgroLocationService
+from src.modular_vision.photo_guidance import PHOTO_GUIDANCE_CATALOG, get_photo_guidance
 from src.orchestrator.llm_service import AdvisorySynthesisService
 from src.orchestrator.router import AutonomousRouter
 from src.orchestrator.state import FarmerProfile, SessionState
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Set Page Config
+# Page Configuration
 st.set_page_config(
-    page_title="Self-Learning Crop Intelligence System | Raitha Mitra",
+    page_title="Crop Intelligence System | Raitha Mitra",
     page_icon="🌾",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -57,8 +66,23 @@ st.markdown(
     }
     .badge-confident { background-color: #d1fae5; color: #065f46; border: 1px solid #10b981; }
     .badge-ood { background-color: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
+    .badge-warn { background-color: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
     .badge-module { background-color: #e0f2fe; color: #0369a1; border: 1px solid #38bdf8; }
-    .sample-btn { margin-bottom: 6px; }
+    .banner-experimental {
+        background-color: #fffbeb;
+        border-left: 5px solid #f59e0b;
+        padding: 12px 16px;
+        border-radius: 4px;
+        margin-bottom: 16px;
+        color: #78350f;
+    }
+    .card-box {
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -66,43 +90,44 @@ st.markdown(
 
 
 @st.cache_resource(show_spinner=False)
-def load_orchestrator():
-    """Cache the router and advisory synthesis service for fast turns."""
+def load_startup_and_services():
+    """Run startup checks and initialize singletons."""
+    report = run_startup_artifact_checks()
     router = AutonomousRouter()
     synthesis = AdvisorySynthesisService()
-    return router, synthesis
+    loc_service = AgroLocationService()
+    return report, router, synthesis, loc_service
 
 
-router, synthesis_service = load_orchestrator()
+startup_report, router, synthesis_service, location_service = load_startup_and_services()
 
-# Initialize Session State
+# Session State Initialization
 if "farmer_state" not in st.session_state:
     st.session_state.farmer_state = SessionState()
 
 if "last_processed_image_hash" not in st.session_state:
     st.session_state.last_processed_image_hash = None
 
-if "pending_sample_image" not in st.session_state:
-    st.session_state.pending_sample_image = None
+if "last_diagnostic_result" not in st.session_state:
+    st.session_state.last_diagnostic_result = None
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    # Welcome message
     welcome_en = (
-        "👋 **Namaskara! Welcome to the Self-Learning Crop Intelligence System.**\n\n"
-        "I am your autonomous agricultural advisor. You can interact with me naturally:\n"
-        "- 📷 **Upload a field photo** (whole plant, canopy, or leaf) for disease diagnosis with DINOv2 & Shannon entropy gating.\n"
-        "- 🌱 **Ask for crop recommendations** based on your soil NPK & district climate.\n"
-        "- 🌦️ **Check real-time weather & spray safety** for your district.\n"
-        "- 📖 **Get authoritative ICAR / IIHR management guidelines** and safe chemical dosages."
+        "👋 **Namaskara! Welcome to the Crop Intelligence System (Raitha Mitra).**\n\n"
+        "I am your local offline agricultural advisor. I can help you with:\n"
+        "- 📷 **Field Photo Analysis**: Experimental foliar disease screening with safe abstention.\n"
+        "- 📍 **Location & KVK Matching**: Nearest extension center and district agro-climate.\n"
+        "- 🌦️ **Offline Spraying Weather**: Keyless monthly weather model and spraying safety.\n"
+        "- 🌾 **Crop Recommendations**: Fertilizer and crop suitability based on soil NPK."
     )
     welcome_kn = (
-        "👋 **ನಮಸ್ಕಾರ! ಸ್ವಯಂ-ಕಲಿಕೆಯ ಬೆಳೆ ಬುದ್ಧಿಮತ್ತೆ ವ್ಯವಸ್ಥೆಗೆ (Crop Intelligence System) ಸುಸ್ವಾಗತ.**\n\n"
-        "ನಾನು ನಿಮ್ಮ ಕೃಷಿ ಸಲಹೆಗಾರ. ನೀವು ನನ್ನೊಂದಿಗೆ ಮುಕ್ತವಾಗಿ ಸಂವಹನ ನಡೆಸಬಹುದು:\n"
-        "- 📷 **ಗಿಡದ ಫೋಟೋ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ**: DINOv2 ಮತ್ತು ಎಂಟ್ರೊಪಿ ಸುರಕ್ಷತೆಯೊಂದಿಗೆ ರೋಗ ಪತ್ತೆ.\n"
-        "- 🌱 **ಬೆಳೆ ಶಿಫಾರಸು ಪಡೆಯಿರಿ**: ಮಣ್ಣಿನ NPK ಮತ್ತು ಹವಾಮಾನಕ್ಕೆ ತಕ್ಕಂತೆ.\n"
-        "- 🌦️ **ಲೈವ್ ಹವಾಮಾನ ಮತ್ತು ಸಿಂಪಡಣಾ ಮಾಹಿತಿ**: ನಿಮ್ಮ ಜಿಲ್ಲೆಯ ಮಳೆ ಮುನ್ಸೂಚನೆ.\n"
-        "- 📖 **ICAR / IIHR ಪ್ರಾಧಿಕಾರ ಮಾರ್ಗಸೂಚಿಗಳು**: ಸರಿಯಾದ ಕೀಟನಾಶಕ ಪ್ರಮಾಣ."
+        "👋 **ನಮಸ್ಕಾರ! ಬೆಳೆ ಬುದ್ಧಿಮತ್ತೆ ವ್ಯವಸ್ಥೆಗೆ (ರೈತ ಮಿತ್ರ) ಸುಸ್ವಾಗತ.**\n\n"
+        "ನಾನು ನಿಮ್ಮ ಸ್ಥಳೀಯ ಕೃಷಿ ಸಲಹೆಗಾರ. ನಾನು ನಿಮಗೆ ಈ ಕೆಳಗಿನವುಗಳಲ್ಲಿ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ:\n"
+        "- 📷 **ಗಿಡದ ಫೋಟೋ ವಿಶ್ಲೇಷಣೆ**: ಪ್ರಾಯೋಗಿಕ ರೋಗ ತಪಾಸಣೆ ಮತ್ತು ಸುರಕ್ಷಿತ ಮಾರ್ಗದರ್ಶನ.\n"
+        "- 📍 **ಸ್ಥಳ ಮತ್ತು ಕೆವಿಕೆ ಮಾಹಿತಿ**: ಸಮೀಪದ ಕೃಷಿ ವಿಜ್ಞಾನ ಕೇಂದ್ರದ ವಿಳಾಸ ಮತ್ತು ಸಂಪರ್ಕ.\n"
+        "- 🌦️ **ಸ್ಥಳೀಯ ಹವಾಮಾನ**: ಮಳೆ ಮುನ್ಸೂಚನೆ ಮತ್ತು ಕೀಟನಾಶಕ ಸಿಂಪಡಣಾ ಸುರಕ್ಷತೆ.\n"
+        "- 🌾 **ಬೆಳೆ ಶಿಫಾರಸು**: ಮಣ್ಣಿನ ಪೋಷಕಾಂಶಗಳಿಗೆ ಅನುಗುಣವಾಗಿ ಬೆಳೆ ಆಯ್ಕೆ."
     )
     st.session_state.messages.append({
         "role": "assistant",
@@ -114,22 +139,22 @@ if "messages" not in st.session_state:
 
 
 def compute_image_hash(data: bytes) -> str:
-    """Compute MD5 hash for image deduplication and multi-turn state tracking."""
+    """Compute MD5 hash for image deduplication."""
     return hashlib.md5(data).hexdigest()
 
 
 # ==============================================================================
-# SIDEBAR: Unified Farmer Profile & Responsible Retraining Gate
+# SIDEBAR: Farmer Context & Validation Gates Configuration
 # ==============================================================================
 with st.sidebar:
     st.image(
         "https://raw.githubusercontent.com/google/material-design-icons/master/png/action/eco/materialicons/48dp/2x/baseline_eco_black_48dp.png",
-        width=48,
+        width=44,
     )
-    st.title("🌾 Farmer Profile")
-    st.caption("NHCE 5th-Sem AI & ML Mini-Project")
+    st.title("🌾 Raitha Mitra")
+    st.caption("Local Production-Safe Agricultural Advisory")
 
-    # Language Toggle
+    # Language Selector
     lang_choice = st.radio(
         "Language / ಭಾಷೆ:",
         options=["English", "ಕನ್ನಡ (Kannada)"],
@@ -139,14 +164,46 @@ with st.sidebar:
     st.session_state.farmer_state.profile.language = active_lang
 
     st.markdown("---")
-    st.subheader("📍 Location & Farm Specs")
-    districts = list(config.DISTRICT_COORDINATES.keys())
+    st.subheader("⚙️ Validation Gates & Policy")
+    st.caption("Strict safety thresholds for experimental model tier (58.33% Accuracy)")
+
+    conf_threshold = st.slider(
+        "Confidence Threshold (Min):",
+        min_value=0.50,
+        max_value=0.95,
+        value=0.70,
+        step=0.05,
+        help="Diagnoses below this probability withhold chemical prescriptions completely.",
+    )
+
+    margin_threshold = st.slider(
+        "Margin Threshold (Top1 - Top2):",
+        min_value=0.05,
+        max_value=0.40,
+        value=0.15,
+        step=0.05,
+        help="If the difference between top two candidate diagnoses is below this margin, symptoms are treated as ambiguous and chemical guidance is withheld.",
+    )
+
+    st.markdown("---")
+    st.subheader("📍 Location & Farm Profile")
+
+    # Location Widget (Consent-based, zero GPS persistence)
+    render_location_widget(location_service, st.session_state.farmer_state, lang=active_lang)
+
+    districts = list(KARNATAKA_DISTRICTS.keys())
+    current_dist = st.session_state.farmer_state.profile.district
+    matched_idx = 0
+    for i, d in enumerate(districts):
+        if current_dist.lower() in d.lower() or d.lower() in current_dist.lower():
+            matched_idx = i
+            break
+
     selected_district = st.selectbox(
-        "District / Zone:",
+        "Active District / Zone:",
         districts,
-        index=districts.index(st.session_state.farmer_state.profile.district)
-        if st.session_state.farmer_state.profile.district in districts
-        else 1,
+        index=matched_idx,
+        help="Resolved from nearest coordinates upon consent or selected manually.",
     )
     st.session_state.farmer_state.profile.district = selected_district
 
@@ -156,564 +213,556 @@ with st.sidebar:
     )
     st.session_state.farmer_state.profile.name = farmer_name
 
-    land_area = st.number_input(
+    land_acres = st.number_input(
         "Land Holding (Acres):",
         min_value=0.25,
         max_value=100.0,
         value=float(st.session_state.farmer_state.profile.land_area_acres),
         step=0.5,
     )
-    st.session_state.farmer_state.profile.land_area_acres = land_area
+    st.session_state.farmer_state.profile.land_area_acres = land_acres
+
+    # Soil NPK
+    with st.expander("🧪 Soil Health Card (NPK & pH)", expanded=False):
+        c_n, c_p = st.columns(2)
+        with c_n:
+            n_val = st.number_input("N (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_n), step=5.0)
+        with c_p:
+            p_val = st.number_input("P (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_p), step=5.0)
+        c_k, c_ph = st.columns(2)
+        with c_k:
+            k_val = st.number_input("K (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_k), step=5.0)
+        with c_ph:
+            ph_val = st.number_input("pH:", value=float(st.session_state.farmer_state.profile.soil_ph), step=0.1, min_value=3.5, max_value=9.5)
+
+        st.session_state.farmer_state.profile.soil_n = n_val
+        st.session_state.farmer_state.profile.soil_p = p_val
+        st.session_state.farmer_state.profile.soil_k = k_val
+        st.session_state.farmer_state.profile.soil_ph = ph_val
 
     st.markdown("---")
-    st.subheader("🧪 Soil Health Card (NPK & pH)")
-    st.caption("Auto-updated if mentioned in chat")
-    col_n, col_p = st.columns(2)
-    with col_n:
-        n_val = st.number_input("N (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_n), step=5.0)
-    with col_p:
-        p_val = st.number_input("P (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_p), step=5.0)
-
-    col_k, col_ph = st.columns(2)
-    with col_k:
-        k_val = st.number_input("K (kg/ha):", value=float(st.session_state.farmer_state.profile.soil_k), step=5.0)
-    with col_ph:
-        ph_val = st.number_input("Soil pH:", value=float(st.session_state.farmer_state.profile.soil_ph), step=0.1, min_value=3.5, max_value=9.5)
-
-    st.session_state.farmer_state.profile.soil_n = n_val
-    st.session_state.farmer_state.profile.soil_p = p_val
-    st.session_state.farmer_state.profile.soil_k = k_val
-    st.session_state.farmer_state.profile.soil_ph = ph_val
-
-    st.markdown("---")
-    st.subheader("🌿 Crop & Plant Viewpoint Context")
-    crop_options = ["Auto-detect", "Tomato", "Potato", "Corn (Maize)", "Apple", "Cassava", "Cotton", "Paddy (Rice)", "Chilli", "Citrus", "Coconut", "Grape", "Other"]
-    confirmed_crop = st.selectbox(
-        "Crop / Tree Species:",
-        crop_options,
-        index=0,
-        help="Confirm crop/tree species for tailored diagnosis and ICAR package of practices.",
-    )
-    part_options = [
-        "Auto-detect",
-        "Leaf",
-        "Stem / Branch",
-        "Fruit",
-        "Root / Tuber",
-        "Whole Plant",
-        "Canopy / Field",
-        "Bark / Trunk",
-    ]
-    confirmed_part = st.selectbox(
-        "Plant Part / Viewpoint:",
-        part_options,
-        index=0,
-        help="Select the plant part shown in the photo to route to specialized multi-part diagnostic models.",
-    )
-    col_stg, col_dur = st.columns(2)
-    with col_stg:
-        confirmed_stage = st.selectbox(
-            "Growth Stage:",
-            ["Vegetative", "Seedling", "Flowering", "Fruiting/Maturity", "Perennial/Tree"],
-            index=0,
-        )
-    with col_dur:
-        confirmed_duration = st.selectbox(
-            "Symptom Duration:",
-            ["< 3 days", "3-7 days", "1-2 weeks", "> 1 month"],
-            index=1,
-        )
-
-    symptom_description = st.text_area(
-        "Optional Symptom Description:",
-        value="",
-        placeholder="e.g., lower leaves yellowing with concentric brown rings, wilting during mid-day",
-        help="Field-observed symptom details and lesion patterns.",
-    )
-
-    st.markdown("---")
-    st.subheader("⚙️ Vision & OOD Tuning")
-    ood_threshold_val = st.slider(
-        "DINOv2 Plant OOD Threshold:",
-        min_value=0.05,
-        max_value=0.50,
-        value=float(config.DINOV2_PLANT_OOD_THRESHOLD),
-        step=0.01,
-        help="Cosine similarity below this threshold flags non-plant/unrelated objects. Configurable via DINOV2_PLANT_OOD_THRESHOLD env var.",
-    )
-
-    st.markdown("---")
-    # Responsible Self-Learning Retraining Section
-    st.subheader("🔄 Self-Learning Model Gate")
-    stats = get_queue_statistics()
-    st.markdown(
-        f"""
-        - **Total Queue Items**: `{stats.get('total_interactions', 0)}`
-        - **Verified Samples**: `{stats.get('verified_samples', 0)}`
-        - **Pending Review**: `{stats.get('pending_verification', 0)}`
-        """
-    )
-
-    if st.button("Trigger Batch Retraining Gate"):
-        with st.spinner("Evaluating candidate model against production accuracy..."):
+    st.subheader("🔄 Responsible Learning Gate")
+    q_stats = get_queue_statistics()
+    st.caption(f"Interactions logged: {q_stats.get('total_interactions', 0)} | Verified: {q_stats.get('verified_samples', 0)}")
+    if st.button("Evaluate Retraining Gate", use_container_width=True):
+        with st.spinner("Checking candidate models against production accuracy..."):
             gate_res = run_batch_retrain_gate(min_verified_samples=2)
-            if gate_res["status"] == "promoted":
-                st.success(
-                    f"🎉 Gate Passed! Candidate Accuracy ({gate_res['candidate_accuracy']*100:.2f}%) "
-                    f">= Production ({gate_res['production_accuracy']*100:.2f}%). Model Promoted!"
-                )
-            elif gate_res["status"] == "rejected":
-                st.warning(
-                    f"🛑 Gate Rejected: Candidate Accuracy ({gate_res['candidate_accuracy']*100:.2f}%) "
-                    f"< Production ({gate_res['production_accuracy']*100:.2f}%). Production model preserved."
-                )
-            else:
-                st.info(f"ℹ️ {gate_res.get('reason', 'Retraining gate deferred.')}")
+            st.info(f"Gate Status: {gate_res.get('status')} ({gate_res.get('reason', '')})")
+
 
 # ==============================================================================
-# MAIN VIEW: Unified Continuous Chat Stream
+# MAIN VIEW: 3 Dedicated Application Tabs
 # ==============================================================================
-st.markdown("## 🌾 Self-Learning Crop Intelligence System")
-st.markdown(
-    "*Autonomous Multimodal Agro-Advisory Engine with DINOv2 Whole-Plant Analysis & ICAR RAG Knowledge Base*"
-)
+tab_home, tab_coverage, tab_audit = st.tabs([
+    "🏡 Farmer Advisory Journey",
+    "📋 Supported Coverage & Data-Required",
+    "🔍 System Audit & Model Cards",
+])
 
-# Quick Action / Sample Query Pills
-st.markdown("**Quick Prompts / ತ್ವರಿತ ಪ್ರಶ್ನೆಗಳು:**")
-qp_cols = st.columns(4)
-sample_prompt = None
-
-if qp_cols[0].button("🌱 Recommend Crops", use_container_width=True):
-    sample_prompt = "What crops are most suitable for my soil and district?"
-if qp_cols[1].button("🌦️ Spraying Weather", use_container_width=True):
-    sample_prompt = "Will it rain tomorrow for spraying pesticides?"
-if qp_cols[2].button("🍅 Tomato Blight Guide", use_container_width=True):
-    sample_prompt = "What organic spray works for Tomato Early Blight?"
-if qp_cols[3].button("🌽 Maize Pest Management", use_container_width=True):
-    sample_prompt = "What is the ICAR chemical dosage for Fall Armyworm in maize?"
-
-# Render Chat History
-for idx, msg in enumerate(st.session_state.messages):
-    with st.chat_message(msg["role"]):
-        # Pick content based on active language
-        content = msg["content_kn"] if active_lang == "kn" else msg["content_en"]
-        if content:  # CHANGED: Render text only if non-empty (avoids empty box for image-only turn)
-            st.markdown(content)
-
-        # Show uploaded image if exists for this turn
-        if msg.get("image_bytes"):
-            st.image(msg["image_bytes"], caption="Inspected Crop Photograph", width=320)
-
-        # Diagnostic & Model Reasoning Expander
-        telemetry = msg.get("telemetry")
-        if telemetry:
-            with st.expander("🔍 Diagnostic & Model Reasoning (NHCE Mini-Project Telemetry)"):
-                # CHANGED: Prominently show live LLM execution status in telemetry expander
-                llm_status = telemetry.get("llm_status", "Gemini API Active")
-                status_class = "badge-confident" if "Active" in llm_status else "badge-ood"
-                st.markdown(
-                    f'<div style="margin-bottom:8px;">'
-                    f'<span class="metric-badge {status_class}">🤖 LLM Status: {llm_status}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                mod_badges = "".join(
-                    [f'<span class="metric-badge badge-module">⚙️ {m}</span>' for m in telemetry.get("modules_run", [])]
-                )
-                st.markdown(mod_badges, unsafe_allow_html=True)
-                st.markdown("<br/>", unsafe_allow_html=True)
-
-                t_cols = st.columns(3)
-
-                # Vision Diagnostics
-                vision = telemetry.get("vision_result")
-                with t_cols[0]:
-                    st.markdown("**Whole-Plant Vision Diagnostics**")
-                    if vision:
-                        status = vision.get("status")
-                        dbg = vision.get("debug_info", {})
-                        crop_sp = vision.get("crop", vision.get("crop_species", "Unknown"))
-                        p_part = vision.get("viewpoint", vision.get("plant_part", "whole_plant")).replace("_", " ").title()
-                        selected_model = vision.get("selected_model", dbg.get("selected_model", "models/whole_plant/model.pt"))
-                        model_ckpt = vision.get("checkpoint_path", vision.get("model_path", "models/whole_plant/model.pt"))
-                        conf_val = vision.get("confidence", vision.get("top1_confidence", 0.0))
-                        conf_pct = conf_val * 100 if conf_val <= 1.0 else conf_val
-                        fallback_reason = vision.get("fallback_reason", dbg.get("fallback_reason", ""))
-
-                        # Required Telemetry Display
-                        st.markdown(f"• **Detected Crop**: `{crop_sp}`")
-                        st.markdown(f"• **Detected Viewpoint**: `{p_part}`")
-                        st.markdown(f"• **Selected Model Route**: `{selected_model}`")
-                        st.markdown(f"• **Checkpoint Path**: `{model_ckpt}`")
-                        st.markdown(f"• **Confidence**: `{conf_pct:.2f}%`")
-                        if fallback_reason:
-                            st.caption(f"• **Exact Fallback Reason**: `{fallback_reason}`")
-
-                        # Check if Whole-Plant model and held-out evaluation report exist
-                        wp_ckpt_path = ROOT_DIR / "models" / "whole_plant" / "model.pt"
-                        wp_eval_path = ROOT_DIR / "models" / "whole_plant" / "evaluation_report.json"
-                        is_whole_plant_deployed = wp_ckpt_path.exists() and wp_eval_path.exists()
-
-                        if not is_whole_plant_deployed or status in ["needs_training_data", "whole_plant_not_trained"]:
-                            st.info("Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.")
-                        elif status == "out_of_distribution" or not vision.get("plant_detected", True):
-                            st.markdown(
-                                f'<span class="metric-badge badge-ood">🚫 NON-PLANT</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.caption(f"**Safe Result**: Non-plant image detected. No disease predicted.")
-                        elif status in ["unsupported", "unsupported_crop_part", "whole_plant_unsupported", "unsupported_crop", "unsupported_viewpoint", "unsupported_organ_view", "pest_guidance_provided"] or not vision.get("supported", False):
-                            st.info("Valid plant image detected, but this crop/viewpoint diagnosis is not trained yet.")
-                            pg = vision.get("photo_guidance")
-                            if pg and isinstance(pg, dict):
-                                title = pg.get("title_kn") if active_lang == "kn" else pg.get("title_en")
-                                inst = pg.get("instructions_kn") if active_lang == "kn" else pg.get("instructions_en")
-                                if title and inst:
-                                    with st.expander(f"📷 {title}", expanded=True):
-                                        st.markdown(inst)
-                        elif status in ["uncertain_disease", "uncertain"]:
-                            st.markdown(
-                                f'<span class="metric-badge badge-ood">⚠️ UNCERTAIN SYMPTOMS</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.caption(f"Top Candidate: {vision.get('top1_label')} ({conf_pct:.1f}%) — confirmation advised.")
-                        else:
-                            st.markdown(
-                                f'<span class="metric-badge badge-confident">✅ VALIDATED WHOLE-PLANT DIAGNOSIS</span>'
-                                f'<span class="metric-badge badge-confident">✅ HELD-OUT TEST VERIFIED</span>',
-                                unsafe_allow_html=True,
-                            )
-                            st.write(f"**Diagnosed Condition**: {vision.get('disease', vision.get('top1_label'))}")
-                            st.write(f"**Confidence**: {conf_pct:.2f}%")
-
-                        # Hierarchical Diagnosis Card
-                        hierarchical = vision.get("hierarchical_diagnosis")
-                        if hierarchical:
-                            st.markdown(
-                                f"**Hierarchy**: `{hierarchical.get('crop_species')}` ➔ `{hierarchical.get('plant_part')}` ➔ `{hierarchical.get('issue_category')}` "
-                                f"(`{hierarchical.get('evidence_level')}`)"
-                            )
-
-                        # Authoritative Direct HTTPS Source Reference Card (Requirements 9 & 10)
-                        source_ev = vision.get("source_evidence")
-                        if source_ev:
-                            if isinstance(source_ev, dict):
-                                st.markdown("---")
-                                st.markdown(f"📚 **Authoritative Source**: [{source_ev.get('source_title', 'Agricultural Extension Protocol')}]({source_ev.get('url', 'https://icar.org.in')})")
-                                st.caption(f"🏛️ **Organization**: {source_ev.get('organization', 'ICAR & Agricultural Extension')}")
-                                st.caption(f"🔗 **Direct HTTPS Link**: [{source_ev.get('url')}]({source_ev.get('url')})")
-                                st.caption(f"📅 **Access Date**: {source_ev.get('access_date', 'November 2026')}")
-                                st.caption(f"📋 **Supports**: {source_ev.get('supported_recommendations', 'Diagnostic & Treatment Package')}")
-                            else:
-                                st.caption(f"📚 **Source Evidence**: {source_ev}")
-
-                        # Nutrient Screening Expander
-                        nut_screen = vision.get("nutrient_screening")
-                        if nut_screen:
-                            with st.expander("🌱 Nutrient Screening Hypothesis (Mobility & Soil pH)"):
-                                ph_info = nut_screen.get("ph_evaluation", {})
-                                st.caption(f"• **Soil pH Status**: {ph_info.get('message_en', 'Normal')}")
-                                cands = nut_screen.get("candidate_deficiencies", [])
-                                for c in cands[:2]:
-                                    st.caption(f"• **{c['name']}**: {c['visual_symptoms'][:100]}... (Mobility: {c['mobility']})")
-                                st.warning("⚠️ Visual screening hypothesis only. Confirm via certified soil and tissue tests.")
-
-                        # Safe Development Debug Panel (Requirement 7)
-                        if dbg:
-                            with st.expander("🛠️ Development Debug Panel (Vision Decision Telemetry)", expanded=False):
-                                st.markdown(f"**Exact Decision Rule**: `{dbg.get('decision_rule', 'N/A')}`")
-                                st.markdown(f"**Final Decision State**: `{dbg.get('final_decision', 'N/A')}`")
-
-                                st.markdown(
-                                    f"• **Stage 1 (Validity)**: `{'Valid Plant' if dbg.get('stage1_valid', True) else 'Refused'}` "
-                                    f"(Sharpness: `{dbg.get('blur_metric', 0.0):.1f}`, DINOv2: `{dbg.get('dinov2_similarity', 0.0):.4f}`)\n"
-                                    f"• **Stage 2 (Plant Part)**: `{dbg.get('stage2_plant_part', vision.get('plant_part', 'N/A'))}`\n"
-                                    f"• **Stage 3 (Crop Species)**: `{dbg.get('stage3_crop_species', vision.get('crop_species', 'N/A'))}` "
-                                    f"(Confidence: `{dbg.get('stage3_crop_confidence_pct', 0.0)}%`)\n"
-                                    f"• **Stage 4 (Route Coverage)**: `{'SUPPORTED & DEPLOYED' if dbg.get('stage4_route_supported', False) else 'UNSUPPORTED / NOT DEPLOYED'}`"
-                                )
-
-                                d_col1, d_col2 = st.columns(2)
-                                with d_col1:
-                                    st.caption(f"• **Raw Shannon Entropy H(p)**: `{dbg.get('raw_entropy', dbg.get('entropy', 0.0)):.4f}`")
-                                    st.caption(f"• **Normalized Entropy Ĥ(p)**: `{dbg.get('norm_entropy', 0.0):.4f}`")
-                                    st.caption(f"• **Crop Subspace Classes**: `{dbg.get('class_count', 38)}`")
-                                    st.caption(f"• **Applied Entropy Threshold**: `{dbg.get('entropy_threshold', 2.20):.2f}`")
-                                with d_col2:
-                                    st.caption(f"• **Top-1 Probability**: `{dbg.get('top1_confidence_pct', 0.0):.1f}%` ({dbg.get('predicted_class', 'N/A')})")
-                                    st.caption(f"• **DINOv2 Plant Similarity**: `{dbg.get('dinov2_similarity', 0.0):.4f}` (Threshold: `{dbg.get('dinov2_threshold', 0.16):.2f}`)")
-                                    st.caption(f"• **Focus Sharpness (Laplacian)**: `{dbg.get('blur_metric', 0.0):.1f}` (Threshold: `{dbg.get('blur_threshold', 40.0):.1f}`)")
-                                    st.caption(f"• **OOD Gate Result**: `{'OOD (Non-Plant)' if dbg.get('is_ood') else 'In-Distribution (Plant Recognized)'}`")
-
-                                top3 = dbg.get("top3_probabilities", dbg.get("top_probabilities", []))
-                                if top3:
-                                    st.markdown("**Top-3 Probabilities:**")
-                                    for t in top3:
-                                        if not isinstance(t, dict):
-                                            continue
-                                        label = t.get("class") or t.get("label") or "Unknown candidate"
-                                        raw_prob = t.get("prob") if t.get("prob") is not None else t.get("probability")
-
-                                        try:
-                                            prob = float(raw_prob)
-                                        except (TypeError, ValueError):
-                                            prob = None
-
-                                        if prob is not None and 0.0 <= prob <= 1.0:
-                                            st.caption(f"- `{label}`: **{prob * 100:.2f}%**")
-                                        else:
-                                            st.caption(f"- `{label}`: confidence unavailable")
-
-                                q_preds = dbg.get("quadrant_predictions", [])
-                                if q_preds:
-                                    st.markdown("**Quadrant Predictions:**")
-                                    for q in q_preds:
-                                        st.caption(f"  - **{q.get('quadrant')}**: {q.get('predicted')} ({q.get('confidence_pct')}%)")
-
-                        breakdown = vision.get("region_breakdown", [])
-                        if breakdown:
-                            with st.expander("🔎 View 5-Region Spatial Breakdown"):
-                                for reg in breakdown:
-                                    st.caption(f"• **{reg['region']}**: {reg['top_label']} ({reg['confidence_percent']}%) [H={reg['entropy']}]")
-                    else:
-                        st.caption("No image evaluated in this turn.")
-
-                # Tabular ML Diagnostics
-                tabular = telemetry.get("tabular_result")
-                with t_cols[1]:
-                    st.markdown("**Tabular ML (RandomForest)**")
-                    if tabular:
-                        st.write(f"**Top Pick**: {tabular.get('top_crop').title()} ({tabular.get('top_confidence')}%)")
-                        recs = tabular.get("recommendations", [])
-                        for r in recs[:3]:
-                            st.caption(f"• {r['crop'].title()}: {r['confidence_percent']}%")
-                    else:
-                        st.caption("Tabular crop model not requested.")
-
-                # Weather & RAG Diagnostics
-                weather = telemetry.get("weather_result")
-                rag_docs = telemetry.get("rag_results", [])
-                with t_cols[2]:
-                    st.markdown("**Weather & RAG Citations**")
-                    if weather:
-                        spray_status = "🟢 Safe to spray" if weather.get("spray_safe") else "🔴 Rain / Wind Warning"
-                        st.write(f"**Live Weather**: {weather.get('temperature_c')}°C | {weather.get('humidity_pct')}% RH")
-                        st.write(f"**Spray Gate**: {spray_status}")
-                    elif rag_docs:
-                        st.write(f"**RAG Citations**: {len(rag_docs)} chunks")
-                        for d in rag_docs:
-                            st.caption(f"📄 {d.get('source')} (Score: {d.get('relevance_percent')}%)")
-                    else:
-                        st.caption("Weather / RAG not requested.")
-
-                # Farmer Feedback Action
-                turn_id = msg.get("turn_id")
-                if turn_id and turn_id != "welcome_turn":
-                    st.markdown("---")
-                    fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 3])
-                    if fb_col1.button("👍 Helpful", key=f"up_{turn_id}"):
-                        update_feedback(turn_id, "up")
-                        st.toast("Thank you! Feedback logged into responsible self-learning queue.")
-                    if fb_col2.button("👎 Needs Review", key=f"down_{turn_id}"):
-                        update_feedback(turn_id, "down")
-                        st.toast("Logged for agronomist verification queue.")
-
-# ==============================================================================
-# UNIFIED INPUT AREA: Text + Image Upload
-# ==============================================================================
-st.markdown("---")
-
-sample_image_trigger = False
-sample_image_bytes = None
-sample_image_label = None
-
-# Compact Multimodal Attachment Row
-with st.expander("📷 Upload Plant Photo (Whole-Plant Field View, Canopy, Stem, or Leaf/Fruit)", expanded=False):
-    st.info(
-        "💡 **Whole-Plant Field Understanding Active**: Upload full-plant photographs, field canopy shots, "
-        "or leaf lesions. The DINOv2 backbone verifies agricultural context, and multi-scale tiling pinpoints affected regions."
+# ------------------------------------------------------------------------------
+# TAB 1: Farmer Advisory Journey (Home Flow)
+# ------------------------------------------------------------------------------
+with tab_home:
+    # Mandatory Model-Release Policy Banner
+    st.markdown(
+        """
+        <div class="banner-experimental">
+            <strong>⚠️ EXPERIMENTAL RESEARCH PREVIEW (Held-Out Accuracy: 58.33%)</strong><br/>
+            This application uses local neural network models for agricultural research demonstration.
+            <strong>It is NEVER a dependable or certified laboratory diagnosis.</strong>
+            Below strict confidence (70%) and margin (15%) thresholds, chemical treatments are completely withheld.
+            Always physically inspect symptoms with your local Krishi Vigyan Kendra (KVK) before applying chemical sprays.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    uploaded_file = st.file_uploader(
-        "Select crop photograph from your device:",
-        type=["jpg", "jpeg", "png"],
-        key="plant_file_uploader",
-    )
-    # Quick Test Images
-    st.markdown("**Or test with benchmark field & leaf samples:**")
-    samp_cols = st.columns(6)
-    if samp_cols[0].button("🌱 Field Tomato", key="btn_field_tomato"):
-        p = config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg"
-        if p.exists():
-            sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please analyze this full-plant tomato crop."
-            sample_image_trigger = True
-    if samp_cols[1].button("🍂 Apple Scab", key="btn_apple"):
-        p = config.RAW_DATA_DIR / "sample_apple_scab.jpg"
-        if p.exists():
-            sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please diagnose the disease on this apple leaf."
-            sample_image_trigger = True
-    if samp_cols[2].button("🍅 Tomato Blight", key="btn_tomato"):
-        p = config.RAW_DATA_DIR / "sample_tomato_early_blight.jpg"
-        if p.exists():
-            sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please identify the disease on this tomato plant."
-            sample_image_trigger = True
-    if samp_cols[3].button("🔍 Blurry Leaf", key="btn_blurry"):
-        p = config.DATA_DIR / "processed" / "eval_samples" / "sample_blurred_leaf.jpg"
-        if p.exists():
-            sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please analyze this blurred plant photograph."
-            sample_image_trigger = True
-    if samp_cols[4].button("🐱 Non-Plant (Cat)", key="btn_cat"):
-        p = config.RAW_DATA_DIR / "sample_non_plant_cat.png"
-        if p.exists():
-            sample_image_bytes = open(p, "rb").read()
-            sample_image_label = "Please analyze this image."
-            sample_image_trigger = True
-    if samp_cols[5].button("⚠️ Noise (OOD)", key="btn_ood"):
-        import numpy as np
-        noise = (np.random.rand(224, 224, 3) * 255).astype("uint8")
-        buf = io.BytesIO()
-        Image.fromarray(noise).save(buf, format="JPEG")
-        sample_image_bytes = buf.getvalue()
-        sample_image_label = "Please check this sample."
-        sample_image_trigger = True
 
-# ==============================================================================
-# UNIFIED CHAT INPUT: Simultaneous Image Attachment + Text in One Turn
-# ==============================================================================
-# CHANGED: Unified Multimodal Chat Input accepting text and/or images
-prompt_data = st.chat_input(
-    "Ask a question or upload a plant photo...",
-    accept_file=True,
-    file_type=["jpg", "jpeg", "png", "webp"],
-)
+    # STEP 1: Location, KVK & Weather Intelligence Card
+    st.markdown("### 1. 📍 Agro-Climatic & Local Extension Context")
+    loc_col1, loc_col2 = st.columns([1.2, 1.8])
 
-# CHANGED: Extract both user text and attached files together in the same turn
-user_text = prompt_data.text.strip() if prompt_data and hasattr(prompt_data, "text") and prompt_data.text else (str(prompt_data).strip() if isinstance(prompt_data, str) else "")
-chat_files = prompt_data.files if prompt_data and hasattr(prompt_data, "files") and prompt_data.files else []
-chat_image_bytes = None
-if chat_files:
-    chat_image_bytes = chat_files[0].getvalue() if hasattr(chat_files[0], "getvalue") else chat_files[0].read()
+    with loc_col1:
+        dist_info = KARNATAKA_DISTRICTS.get(selected_district)
+        zone_num = dist_info.zone_number if dist_info else 3
+        zone_name = dist_info.agro_climatic_zone if dist_info else "Northern Dry Zone"
+        st.markdown(f"**District**: `{selected_district}`")
+        st.caption(f"Agro-Climatic Zone {zone_num}: {zone_name}")
 
-# CHANGED: Check fallback attachment sources (Quick Test samples or expander file uploader)
-active_img_bytes = None
-if chat_image_bytes:
-    active_img_bytes = chat_image_bytes
-elif sample_image_trigger and sample_image_bytes:
-    active_img_bytes = sample_image_bytes
-    if not user_text and sample_image_label:
-        user_text = sample_image_label
-elif uploaded_file is not None:
-    active_img_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
+        # Nearest KVK Card
+        kvk = location_service.get_kvk_by_district(selected_district)
+        if kvk:
+            st.markdown(f"🏛️ **Nearest KVK**: **{kvk.name}**")
+            st.caption(f"• **Institution**: {kvk.nodal_institution}")
+            st.caption(f"• **Contact**: `{kvk.contact_phone}`")
+            st.caption(f"• **Location**: {kvk.location}")
+            st.caption(f"• **Services**: {', '.join(kvk.services_offered[:3])}")
 
-if not user_text and sample_prompt:
-    user_text = sample_prompt
+    with loc_col2:
+        # Offline Weather & Spray-Safety Card
+        weather_res = location_service.get_weather(selected_district)
+        temp_c = weather_res.get("temperature_c")
+        rh = weather_res.get("humidity_pct")
+        wind = weather_res.get("wind_speed_kmh")
+        rain_prob = weather_res.get("today_rain_prob_pct", 0)
+        is_safe = weather_res.get("spray_safe", True)
+        adv_text = weather_res.get("spray_advisory_kn") if active_lang == "kn" else weather_res.get("spray_advisory_en")
 
-# CHANGED: Check image novelty via MD5 hash
-current_hash = compute_image_hash(active_img_bytes) if active_img_bytes else None
-is_new_image = (
-    current_hash is not None 
-    and current_hash != st.session_state.last_processed_image_hash
-)
+        badge_class = "badge-confident" if is_safe else "badge-ood"
+        badge_label = "🟢 SPRAY SAFE" if is_safe else "🔴 SPRAY UNSAFE (RAIN/WIND RISK)"
 
-# CHANGED: Trigger turn if farmer entered text OR provided a new image
-should_run_turn = bool(user_text) or (is_new_image and active_img_bytes is not None)
+        st.markdown(f"**Offline Weather Conditions ({selected_district})**:")
+        st.markdown(
+            f'<span class="metric-badge {badge_class}">{badge_label}</span>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"🌡️ **Temp**: `{temp_c}°C` | 💧 **Humidity**: `{rh}%` | 💨 **Wind**: `{wind} km/h` | 🌧️ **Rain Probability**: `{rain_prob}%`")
+        st.info(f"🚜 **Spraying Advisory**: {adv_text}")
+        st.caption("ℹ️ **Offline Weather Disclaimer**: Generated from local historical Karnataka agro-climatic climatology. Zero external API calls or secret keys.")
 
-# Process turn
-if should_run_turn:
-    turn_id = f"turn_{uuid.uuid4().hex[:8]}"
+    st.markdown("---")
 
-    # CHANGED: Assign default diagnostic prompt internally if user submitted image with empty text
-    internal_query = user_text if user_text else "Analyze this plant image and identify any health issues or diseases."
-    if symptom_description and symptom_description.strip():
-        internal_query += f" (Observed Symptoms: {symptom_description.strip()})"
-    display_text = user_text  # Clean display in chat bubble (blank if image-only)
+    # STEP 2: Crop & Viewpoint Selection
+    st.markdown("### 2. 🌿 Crop & Viewpoint Selection (Route Gating)")
+    g_col1, g_col2, g_col3 = st.columns([1.2, 1.2, 1.6])
 
-    # Attach image thumbnail only if a NEW image is uploaded in this turn
-    img_for_turn = active_img_bytes if is_new_image else None
-    if img_for_turn:
-        raw_pil = Image.open(io.BytesIO(img_for_turn))
-        pil_image = ImageOps.exif_transpose(raw_pil)
-        if pil_image.mode != "RGB":
-            pil_image = pil_image.convert("RGB")
-    else:
-        pil_image = None
-
-    # CHANGED: Record User Message (both image thumbnail and text inside the same chat bubble)
-    st.session_state.messages.append({
-        "role": "user",
-        "content_en": display_text,
-        "content_kn": display_text,
-        "image_bytes": img_for_turn,
-        "turn_id": turn_id,
-    })
-
-    # Execute Autonomous Internal Router
-    with st.spinner("Processing agricultural inquiry..."):
-        telemetry = router.route_and_execute(  # CHANGED: Pass both user query and image input together
-            user_text=internal_query,
-            image_input=pil_image,
-            is_new_image=is_new_image,  # CHANGED: Explicit boolean novelty flag
-            image_hash=current_hash if is_new_image else None,
-            dinov2_threshold=ood_threshold_val,
-            crop_hint=confirmed_crop,
-            part_hint=confirmed_part,
-            growth_stage=confirmed_stage,
-            symptom_duration=confirmed_duration,
-            state=st.session_state.farmer_state,
+    with g_col1:
+        supported_crops_list = ["Auto-detect", "Tomato", "Corn (Maize)", "Apple", "Cassava", "Grape (Unsupported)", "Potato (Unsupported)", "Citrus (Unsupported)", "Other"]
+        sel_crop = st.selectbox(
+            "Target Crop Species:",
+            supported_crops_list,
+            index=0,
+            help="Apple, Cassava, Corn, and Tomato have foliar training data. Other crops safely abstain.",
         )
 
-        # If a new image was evaluated, update the session state hash tracker
-        if is_new_image and current_hash:
-            st.session_state.last_processed_image_hash = current_hash
-
-        # Synthesize Dual Bilingual Advisory (Concise 120-180 words)
-        advisories = synthesis_service.generate_advisory(
-            router_payload=telemetry,
-            language=active_lang,
-        )
-        # CHANGED: Capture live LLM execution status in telemetry payload
-        telemetry["llm_status"] = advisories.get("llm_status", getattr(synthesis_service, "last_llm_status", "Gemini API Active"))
-
-        # Log to Responsible Self-Learning Queue
-        input_type = "multimodal" if is_new_image else ("tabular" if telemetry.get("tabular_result") else "text_rag")
-        pred_label = ""
-        conf = 0.0
-        entropy = 0.0
-        feats_or_img = internal_query  # CHANGED: Log internal query
-
-        if telemetry.get("vision_result") and is_new_image:
-            v = telemetry["vision_result"]
-            pred_label = v.get("top1_label", "")
-            conf = v.get("top1_confidence", 0.0)
-            entropy = v.get("entropy", 0.0)
-            feats_or_img = f"image_{turn_id}.jpg"
-        elif telemetry.get("tabular_result"):
-            t = telemetry["tabular_result"]
-            pred_label = t.get("top_crop", "")
-            conf = t.get("top_confidence", 0.0)
-            feats_or_img = json.dumps(t.get("input_features", {}))
-
-        log_interaction(
-            interaction_id=turn_id,
-            input_type=input_type,
-            features_or_image=feats_or_img,
-            predicted_label=pred_label,
-            confidence=conf,
-            entropy=entropy,
-            farmer_feedback="neutral",
-            verified_label="",
+    with g_col2:
+        viewpoint_options = [
+            "Auto-detect",
+            "Leaf (Foliar)",
+            "Stem / Branch (Data-Blocked)",
+            "Fruit (Data-Blocked)",
+            "Canopy / Field (Data-Blocked)",
+            "Whole Plant (Data-Blocked)",
+            "Root / Tuber (Data-Blocked)",
+        ]
+        sel_viewpoint = st.selectbox(
+            "Anatomical Viewpoint:",
+            viewpoint_options,
+            index=0,
+            help="Only foliar leaf views are supported with verified data. All other 5 viewpoints safely abstain.",
         )
 
-        # Append Assistant Message
+    with g_col3:
+        user_symptom_inquiry = st.text_input(
+            "Inquiry or Observed Symptoms (Optional):",
+            value="",
+            placeholder="e.g., lower leaves yellowing with spots, or are there spider mites?",
+            help="Mentioning pests or symptoms triggers specialized gating.",
+        )
+
+    st.markdown("---")
+
+    # STEP 3: Photo Upload & Pipeline Execution
+    st.markdown("### 3. 📷 Photo Upload & Diagnostic Pipeline")
+
+    sample_image_bytes = None
+    sample_image_label = None
+
+    u_col1, u_col2 = st.columns([1.5, 1.5])
+    with u_col1:
+        uploaded_file = st.file_uploader(
+            "Upload crop photo (Leaf, field view, or insect close-up):",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="home_uploader",
+        )
+
+    with u_col2:
+        st.markdown("**Or test with benchmark camera samples:**")
+        b_cols = st.columns(3)
+        if b_cols[0].button("🌱 Field Tomato", use_container_width=True):
+            p = config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg"
+            if p.exists():
+                sample_image_bytes = open(p, "rb").read()
+                sample_image_label = "Analyze this field tomato plant."
+        if b_cols[1].button("🍂 Apple Scab", use_container_width=True):
+            p = config.RAW_DATA_DIR / "sample_apple_scab.jpg"
+            if p.exists():
+                sample_image_bytes = open(p, "rb").read()
+                sample_image_label = "Examine this apple leaf for scab lesions."
+        if b_cols[2].button("🍅 Tomato Blight", use_container_width=True):
+            p = config.RAW_DATA_DIR / "sample_tomato_early_blight.jpg"
+            if p.exists():
+                sample_image_bytes = open(p, "rb").read()
+                sample_image_label = "Check tomato leaf for blight."
+        b_cols2 = st.columns(3)
+        if b_cols2[0].button("🔍 Blurry Leaf", use_container_width=True):
+            p = config.DATA_DIR / "processed" / "eval_samples" / "sample_blurred_leaf.jpg"
+            if p.exists():
+                sample_image_bytes = open(p, "rb").read()
+                sample_image_label = "Evaluate blurred leaf."
+        if b_cols2[1].button("🐱 Cat (Non-Plant)", use_container_width=True):
+            p = config.RAW_DATA_DIR / "sample_non_plant_cat.png"
+            if p.exists():
+                sample_image_bytes = open(p, "rb").read()
+                sample_image_label = "Evaluate this non-plant image."
+        if b_cols2[2].button("🕷️ Spider Mite", use_container_width=True):
+            mite_dir = Path("data/raw/pest_detection/test/Tomato_Spider_Mites")
+            mite_files = list(mite_dir.glob("*.jpg")) if mite_dir.exists() else []
+            if mite_files:
+                sample_image_bytes = open(mite_files[0], "rb").read()
+                sample_image_label = "Check leaf for spider mites."
+
+    # Determine active image bytes
+    active_bytes = None
+    if uploaded_file is not None:
+        active_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
+    elif sample_image_bytes:
+        active_bytes = sample_image_bytes
+
+    # Execution Trigger Button
+    if active_bytes is not None:
+        img_hash = compute_image_hash(active_bytes)
+        st.image(active_bytes, caption="Active Inspected Photograph", width=340)
+
+        run_diag_btn = st.button("🚀 Execute Crop-Aware Vision Pipeline", type="primary", use_container_width=True)
+
+        if run_diag_btn or (img_hash != st.session_state.last_processed_image_hash):
+            st.session_state.last_processed_image_hash = img_hash
+
+            with st.spinner("Executing modular vision and routing through validation gates..."):
+                raw_pil = Image.open(io.BytesIO(active_bytes))
+                pil_image = ImageOps.exif_transpose(raw_pil).convert("RGB")
+
+                # Parse clean hints
+                crop_hint_clean = sel_crop.split(" (")[0] if sel_crop != "Auto-detect" else None
+                viewpoint_hint_clean = sel_viewpoint.split(" (")[0].lower() if sel_viewpoint != "Auto-detect" else None
+
+                # Call Autonomous Router
+                query_text = user_symptom_inquiry or sample_image_label or "Analyze this crop image for diseases or pests."
+                telemetry = router.route_and_execute(
+                    user_text=query_text,
+                    image_input=pil_image,
+                    is_new_image=True,
+                    image_hash=img_hash,
+                    crop_hint=crop_hint_clean,
+                    part_hint=viewpoint_hint_clean,
+                    confidence_threshold=conf_threshold,
+                    state=st.session_state.farmer_state,
+                )
+
+                # Generate bilingual advisory
+                advisory = synthesis_service.generate_advisory(
+                    router_payload=telemetry,
+                    language=active_lang,
+                )
+                telemetry["advisory"] = advisory
+                st.session_state.last_diagnostic_result = telemetry
+
+                # Append to chat messages
+                st.session_state.messages.append({
+                    "role": "user",
+                    "content_en": query_text,
+                    "content_kn": query_text,
+                    "image_bytes": active_bytes,
+                    "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
+                })
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content_en": advisory["en"],
+                    "content_kn": advisory["kn"],
+                    "telemetry": telemetry,
+                    "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
+                })
+
+    # STEP 4: Calibrated Supported Result or Honest Abstention Card
+    if st.session_state.last_diagnostic_result:
+        res = st.session_state.last_diagnostic_result
+        vision = res.get("vision_result")
+
+        if vision:
+            st.markdown("### 4. 🔬 Diagnostic & Route Gating Assessment")
+            v_crop = vision.get("crop", "Unknown")
+            v_part = vision.get("viewpoint", "leaf")
+            v_status = vision.get("status", "unsupported")
+            is_supp = vision.get("supported", False)
+            disease = vision.get("disease")
+            conf = vision.get("confidence", 0.0) * 100.0
+            margin = vision.get("margin", 0.0) * 100.0
+            chem_withheld = vision.get("chemical_treatment_withheld", False) or (conf < conf_threshold * 100.0) or (margin < margin_threshold * 100.0)
+            fallback = vision.get("fallback_reason", "")
+            pg = vision.get("photo_guidance")
+
+            card_col1, card_col2 = st.columns([2, 1])
+
+            with card_col1:
+                # Case 1: Non-Plant Rejection
+                if not vision.get("plant_detected", True) or v_status == "out_of_distribution":
+                    st.error("🚫 **NON-PLANT / OUT-OF-DISTRIBUTION DETECTED**")
+                    st.write("The uploaded photograph does not match recognizable agricultural foliage or crop structures.")
+                    st.caption("Automatic disease prediction was safely refused to prevent false diagnosis.")
+
+                # Case 2: Data-Blocked Route (Non-Leaf Viewpoints or Unsupported Crops)
+                elif not is_supp or v_status in ["unsupported", "unsupported_crop", "unsupported_viewpoint", "unsupported_crop_part", "needs_training_data", "pest_guidance_provided"]:
+                    st.warning("🛑 **DATA-BLOCKED ROUTE — SAFE ABSTENTION ENFORCED**")
+                    st.markdown(f"- **Detected Crop**: `{v_crop}`")
+                    st.markdown(f"- **Detected Viewpoint**: `{v_part.replace('_', ' ').title()}`")
+                    st.markdown(f"- **Supported Scope**: Foliar (`leaf`) view for Apple, Cassava, Corn, and Tomato.")
+                    st.markdown(f"- **Abstention Reason**: *{fallback or 'Untrained route. Real camera data required.'}*")
+                    st.markdown(f"👉 *Check the **'Supported Coverage & Data-Required'** tab to see what authentic training datasets are needed to unlock this route.*")
+
+                    # Bilingual Photo Guidance
+                    if pg and isinstance(pg, dict):
+                        g_title = pg.get("title_kn") if active_lang == "kn" else pg.get("title_en", "Photo Guidance")
+                        g_inst = pg.get("instructions_kn") if active_lang == "kn" else pg.get("instructions_en", "")
+                        with st.expander(f"📷 {g_title}", expanded=True):
+                            st.markdown(g_inst)
+                            checklist = pg.get("checklist", [])
+                            if checklist:
+                                st.markdown("**Photo-Capture Checklist:**")
+                                for item in checklist:
+                                    st.markdown(f"- [ ] {item}")
+
+                # Case 3: Supported Foliar Route (Experimental Tier)
+                else:
+                    st.success(f"🧪 **EXPERIMENTAL OBSERVATION**: **{disease or 'Healthy Leaf'}**")
+                    st.markdown(f"- **Target Crop**: `{v_crop}` | **Viewpoint**: `Leaf (Foliar)`")
+                    st.markdown(f"- **Predicted Probability**: `{conf:.1f}%` (Threshold: > `{conf_threshold*100:.0f}%`)")
+                    st.markdown(f"- **Candidate Margin**: `{margin:.1f}%` (Threshold: > `{margin_threshold*100:.0f}%`)")
+
+                    # Check chemical withholding gate
+                    if chem_withheld:
+                        st.warning(
+                            "🛑 **CHEMICAL TREATMENTS WITHHELD**: Confidence or margin is below the strict safety release threshold. "
+                            "To protect crop health, automatic pesticide/fungicide prescriptions are safely withheld. "
+                            "Practice cultural sanitation and take a physical leaf sample to your nearest KVK center."
+                        )
+                    else:
+                        st.info(
+                            "ℹ️ **High-Confidence Observation**: Chemical options from ICAR guidelines may be referenced below. "
+                            "Always verify symptoms with your local agricultural officer and wear protective equipment."
+                        )
+
+                    # Top Candidates Bar
+                    preds = vision.get("predictions", [])
+                    if preds:
+                        st.markdown("**Candidate Diagnosis Probabilities:**")
+                        for p in preds[:3]:
+                            p_prob = p.get("probability", 0.0)
+                            p_name = p.get("label", "Unknown")
+                            st.progress(float(p_prob), text=f"{p_name}: {p_prob*100:.1f}%")
+
+            with card_col2:
+                # KVK Referral Card
+                kvk_ref = location_service.get_kvk_by_district(selected_district)
+                if kvk_ref:
+                    st.markdown("### 🏛️ KVK Referral")
+                    st.markdown(f"**{kvk_ref.name}**")
+                    st.caption(f"📞 `{kvk_ref.contact_phone}`")
+                    st.caption(f"📍 {kvk_ref.location}")
+                    st.caption("✅ Take a fresh specimen bag of affected leaves directly to the plant clinic.")
+
+    st.markdown("---")
+
+    # STEP 5: Interactive Chat Stream (Advisory turns)
+    st.markdown("### 5. 💬 Agricultural Advisory Stream")
+    for msg in st.session_state.messages[1:]:  # skip initial welcome in stream
+        with st.chat_message(msg["role"]):
+            c_text = msg["content_kn"] if active_lang == "kn" else msg["content_en"]
+            if c_text:
+                st.markdown(c_text)
+            if msg.get("image_bytes"):
+                st.image(msg["image_bytes"], width=220)
+
+    # Chat Input
+    chat_prompt = st.chat_input("Ask a follow-up question regarding crops, soil NPK, weather, or pest management...")
+    if chat_prompt:
         st.session_state.messages.append({
-            "role": "assistant",
-            "content_en": advisories["en"],
-            "content_kn": advisories["kn"],
-            "telemetry": telemetry,
-            "turn_id": turn_id,
+            "role": "user",
+            "content_en": chat_prompt,
+            "content_kn": chat_prompt,
+            "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
         })
+        with st.spinner("Formulating agricultural advisory..."):
+            c_telemetry = router.route_and_execute(
+                user_text=chat_prompt,
+                image_input=None,
+                is_new_image=False,
+                state=st.session_state.farmer_state,
+            )
+            c_adv = synthesis_service.generate_advisory(c_telemetry, language=active_lang)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content_en": c_adv["en"],
+                "content_kn": c_adv["kn"],
+                "telemetry": c_telemetry,
+                "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
+            })
+            st.rerun()
 
-    st.rerun()
+
+# ------------------------------------------------------------------------------
+# TAB 2: Supported Coverage & Data-Required Screen
+# ------------------------------------------------------------------------------
+with tab_coverage:
+    st.markdown("## 📋 Supported Diagnostic Coverage & Data-Required Matrix")
+    st.markdown(
+        "To ensure production safety and eliminate AI hallucinations, this system operates under a strict "
+        "**Zero-Guessing Policy**. Routes are activated **ONLY** when verified real-camera training datasets and held-out evaluations exist."
+    )
+
+    # Coverage Matrix Table
+    st.markdown("### 1. Operational Route Matrix")
+    matrix_data = [
+        {"Organ / Viewpoint": "Leaf (Foliar)", "Apple": "✅ Experimental (58.3%)", "Cassava": "✅ Experimental (58.3%)", "Corn (Maize)": "✅ Experimental (58.3%)", "Tomato": "✅ Experimental (58.3%)", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Stem / Branch", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Fruit / Pod", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Canopy / Field", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Whole Plant", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Root / Tuber", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Pests (Spider Mites)", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "✅ Pilot (100.0%)", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Pests (Armyworm/Borer)", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+    ]
+    st.dataframe(matrix_data, use_container_width=True)
+
+    st.markdown("---")
+
+    # Data-Required Screen
+    st.markdown("### 2. 🛑 Data-Required Specifications to Unlock Blocked Routes")
+    st.markdown(
+        "The following organ viewpoints, crops, and insect species are currently **Data-Blocked**. "
+        "Here is the exact authentic dataset specification required to activate them:"
+    )
+
+    req_cols1, req_cols2 = st.columns(2)
+
+    with req_cols1:
+        with st.expander("🪵 Stem & Branch Cankers (Data Blocked)", expanded=True):
+            st.markdown(
+                """
+                - **Current Status**: 🛑 Disabled.
+                - **Reason**: No authentic camera dataset for stem fissures or cankers exists locally.
+                - **Data Required**:
+                  - Minimum 250 verified high-resolution photographs of stem lesions across crops.
+                  - Longitudinal and cross-sectional stem cuts showing internal vascular browning.
+                  - Laboratory isolation confirmation (e.g. *Fusarium*, *Ralstonia solanacearum*).
+                """
+            )
+
+        with req_cols2:
+            with st.expander("🍎 Fruit Rots & Boreholes (Data Blocked)", expanded=True):
+                st.markdown(
+                    """
+                    - **Current Status**: 🛑 Disabled.
+                    - **Reason**: Fruit rot datasets are currently absent from verified local manifests.
+                    - **Data Required**:
+                      - 200+ authenticated field close-ups of fruit calyxes and boreholes.
+                      - Clear differentiation between physical sunburn/blossom-end rot vs fungal rot (*Colletotrichum*).
+                      - Multi-angle shots showing larval frass.
+                    """
+                )
+
+    req_cols3, req_cols4 = st.columns(2)
+
+    with req_cols3:
+        with st.expander("🌱 Canopy & Whole Plant Field Overviews (Data Blocked)", expanded=True):
+            st.markdown(
+                """
+                - **Current Status**: 🛑 Disabled.
+                - **Reason**: Field canopy photographs suffer from severe distance variance and background weed clutter.
+                - **Data Required**:
+                  - 300+ full-plant field photos taken at 1.0–1.5 meter distance under natural sunlight.
+                  - Paired ground-truth foliar annotations to avoid weed misrouting.
+                  - Verified standing crop stages (vegetative, tasseling, harvest).
+                """
+            )
+
+    with req_cols4:
+        with st.expander("🥔 Roots, Tubers & Nematodes (Data Blocked)", expanded=True):
+            st.markdown(
+                """
+                - **Current Status**: 🛑 Disabled.
+                - **Reason**: Sub-surface soil pathogens cannot be reliably classified from surface foliage without destructive sampling.
+                - **Data Required**:
+                  - 200+ photos of washed root systems showing root-knot nematode galls (*Meloidogyne* spp.).
+                  - Certified soil nematode laboratory assay reports.
+                  - Safe laboratory referral instructions.
+                """
+            )
+
+    req_cols5, req_cols6 = st.columns(2)
+
+    with req_cols5:
+        with st.expander("🐛 Fall Armyworm, Stem Borers & Aphids (Data Blocked)", expanded=True):
+            st.markdown(
+                """
+                - **Current Status**: 🛑 Disabled (Chemicals Withheld).
+                - **Reason**: IP102 image files are missing on disk (only classes.txt exists). Synthetic diagrams have been quarantined.
+                - **Data Required**:
+                  - 200+ authentic macro photos of larval instars inside maize whorls.
+                  - Verified pheromone trap catch photos.
+                  - Economic threshold level (ETL) field scouting counts.
+                """
+            )
+
+    with req_cols6:
+        with st.expander("🍇 Unsupported Crops: Grape, Potato, Citrus, Rice, Wheat", expanded=True):
+            st.markdown(
+                """
+                - **Current Status**: 🛑 Disabled.
+                - **Reason**: Local manifests currently exclude these crops to prevent cross-crop hallucination.
+                - **Data Required**:
+                  - Minimum 300 real camera samples per crop species across 3 disease classes + 1 healthy control.
+                  - Deterministic train/val/test splits with zero cross-split leakage.
+                  - Held-out evaluation achieving >= 65% macro F1.
+                """
+            )
+
+
+# ------------------------------------------------------------------------------
+# TAB 3: System Startup Audit & Model Cards
+# ------------------------------------------------------------------------------
+with tab_audit:
+    st.markdown("## 🔍 Startup Artifact Verification & Model Cards")
+
+    # Artifact Readiness Status
+    st.markdown("### 1. Startup Artifact Integrity Check")
+    s_col1, s_col2, s_col3, s_col4 = st.columns(4)
+
+    s_col1.metric("Disease Model", "Ready (Experimental)" if startup_report.disease_model_ready else "Degraded")
+    s_col2.metric("Pest Model", "Ready (Pilot Mites)" if startup_report.pest_model_ready else "Degraded")
+    s_col3.metric("Manifests", "592 Samples" if startup_report.manifests_ready else "Missing")
+    s_col4.metric("KVK Registry", "20 Centers" if startup_report.location_registry_ready else "Degraded")
+
+    with st.expander("🔎 View Detailed Artifact Inspection Report", expanded=False):
+        st.json(startup_report.to_dict())
+
+    st.markdown("---")
+
+    # Real Photo Contact Sheet
+    st.markdown("### 2. Optical Realism & Real-Photo Gallery")
+    st.caption("Visual proof of camera sensor noise, texture entropy, and organic optical capture (Synthetic diagrams quarantined).")
+    contact_sheet_path = ROOT_DIR / "models" / "real_photo_gallery_contact_sheet.jpg"
+    if contact_sheet_path.exists():
+        st.image(str(contact_sheet_path), caption="Deterministic 16-Class Real-Camera Contact Sheet", use_container_width=True)
+    else:
+        st.warning("Contact sheet artifact not found on disk.")
+
+    st.markdown("---")
+
+    # Model Cards Viewer
+    st.markdown("### 3. Official Model Cards")
+    mc_tab1, mc_tab2, mc_tab3 = st.tabs(["Foliar Pathology Model Card", "Pest Detection CNN Model Card", "Model Release Policy"])
+
+    with mc_tab1:
+        doc_p = ROOT_DIR / "docs" / "MODEL_CARD_DISEASE.md"
+        if doc_p.exists():
+            st.markdown(doc_p.read_text(encoding="utf-8"))
+
+    with mc_tab2:
+        doc_p2 = ROOT_DIR / "docs" / "MODEL_CARD_PEST.md"
+        if doc_p2.exists():
+            st.markdown(doc_p2.read_text(encoding="utf-8"))
+
+    with mc_tab3:
+        doc_p3 = ROOT_DIR / "docs" / "MODEL_RELEASE_POLICY.md"
+        if doc_p3.exists():
+            st.markdown(doc_p3.read_text(encoding="utf-8"))

@@ -199,11 +199,15 @@ class AutonomousRouter:
                 elif "whole" in text_lower or "plant" in text_lower or "field" in text_lower:
                     detected_part_hint = "whole_plant"
 
+            conf_thresh = kwargs.get("confidence_threshold", 0.40)
+            symptom_desc = kwargs.get("symptom_desc", None)
             wp_res = self.whole_plant_router.route(
                 image_input,
                 crop_hint=detected_crop_hint,
                 viewpoint_hint=detected_part_hint,
                 user_text=user_text,
+                symptom_desc=symptom_desc,
+                confidence_threshold=conf_thresh,
             )
             vision_result = wp_res.to_dict()
             state.set_vision_result(vision_result, image_hash=image_hash)

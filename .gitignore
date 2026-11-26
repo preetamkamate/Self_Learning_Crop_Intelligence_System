@@ -21,7 +21,6 @@ __pycache__/
 Thumbs.db
 
 # Large model artifacts & weights
-models/
 checkpoints/
 *.bin
 *.safetensors
@@ -29,7 +28,21 @@ checkpoints/
 *.pth
 *.onnx
 *.ckpt
+*.joblib
+models/whole_plant/
+models/pest_detector/
 
 # Raw and processed datasets
 data/raw/
 data/processed/
+data/datasets/
+archive/
+
+# Generated contact sheets, temporary reports, logs
+*.jpg
+*.jpeg
+*.png
+*.log
+REAL_PHOTO_GALLERY.md
+DATASET_AUDIT.md
+reproducible_audit.json

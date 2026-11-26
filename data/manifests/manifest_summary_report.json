@@ -1,0 +1,58 @@
+{
+  "status": "success",
+  "total_validated_samples": 592,
+  "disease_classification": {
+    "total_disease_samples": 518,
+    "crops": [
+      "Apple",
+      "Corn (Maize)",
+      "Tomato",
+      "Cassava"
+    ],
+    "classes": [
+      "Tomato Bacterial Spot",
+      "Tomato Late Blight",
+      "Healthy Apple Leaf",
+      "Corn Northern Leaf Blight",
+      "Cassava Bacterial Blight (CBB)",
+      "Healthy Tomato Leaf",
+      "Apple Rust",
+      "Corn Common Rust",
+      "Healthy Corn Leaf",
+      "Corn Gray Leaf Spot",
+      "Cassava Mosaic Disease (CMD)",
+      "Tomato Early Blight",
+      "Apple Scab",
+      "Healthy Cassava Leaf"
+    ],
+    "source_datasets": [
+      "plant-pathology-2021-fgvc8",
+      "cassava-leaf-disease-classification",
+      "PlantVillage-Dataset-master"
+    ],
+    "cross_split_duplicates": 0,
+    "splits": {
+      "train": 350,
+      "val": 84,
+      "test": 84
+    }
+  },
+  "pest_detection": {
+    "total_pest_samples": 74,
+    "classes": [
+      "Healthy Foliage (Pest-Free Control)",
+      "Two-spotted Spider Mites (Tetranychus urticae)"
+    ],
+    "source_datasets": [
+      "PlantVillage Dataset (Mohanty et al., 2016)"
+    ],
+    "cross_split_duplicates": 0,
+    "splits": {
+      "train": 50,
+      "val": 12,
+      "test": 12
+    }
+  },
+  "zero_cross_split_leakage": true,
+  "source_datasets_untouched": true
+}

@@ -204,21 +204,36 @@ def test_pest_detector_safe_abstention_and_guidance():
     """Verify unverified pest routes abstain safely without guessing chemicals."""
     detector = PestDetector()
 
-    res = detector.detect_pest(
+    # Case 1: Specific unverified pest query (e.g. armyworm)
+    res_blocked = detector.detect_pest(
         crop="Corn (Maize)",
         viewpoint="leaf",
         user_text="Is this fall armyworm damage?",
         symptom_desc="ragged holes in whorl",
     )
 
-    assert res.pest_suspected is True
-    assert res.pest_label is None  # Never guess specific pest without verified checkpoint
-    assert res.supported is False
-    assert res.status == "pest_guidance_provided"
-    assert "photo_guidance" in res.to_dict()
-    assert res.photo_guidance["viewpoint_category"] == "pest"
-    assert "IPM" in res.ipm_scouting_advice
-    assert res.metadata["chemical_pesticides_withheld"] is True
+    assert res_blocked.pest_suspected is True
+    assert res_blocked.pest_label is None  # Never guess specific pest without verified checkpoint
+    assert res_blocked.supported is False
+    assert res_blocked.status == "pest_data_blocked"
+    assert "photo_guidance" in res_blocked.to_dict()
+    assert res_blocked.photo_guidance["viewpoint_category"] == "pest"
+    assert "IPM" in res_blocked.ipm_scouting_advice
+    assert res_blocked.metadata["chemical_pesticides_withheld"] is True
+
+    # Case 2: General insect query without verified checkpoint
+    res_general = detector.detect_pest(
+        crop="Corn (Maize)",
+        viewpoint="leaf",
+        user_text="What insect is eating this plant?",
+        symptom_desc="webbing on surface",
+    )
+
+    assert res_general.pest_suspected is True
+    assert res_general.pest_label is None
+    assert res_general.supported is False
+    assert res_general.status == "pest_guidance_provided"
+    assert res_general.metadata["chemical_pesticides_withheld"] is True
 
 
 # ==============================================================================
@@ -373,3 +388,87 @@ def test_modular_pipeline_never_guesses_chemical_treatment_for_unverified(dummy_
         # Telemetry verification
         assert d["debug_info"]["checkpoint_path"] == "None"
         assert d["debug_info"]["stage4_route_supported"] is False
+
+
+# ==============================================================================
+# 6. Missing Model Checkpoint & Graceful Abstention Tests
+# ==============================================================================
+def test_disease_classifier_missing_checkpoint_abstains_safely(tmp_path, dummy_leaf_image):
+    """Verify ModularDiseaseClassifier safely abstains when checkpoint is missing."""
+    nonexistent_model = tmp_path / "nonexistent_model.pt"
+    classifier = ModularDiseaseClassifier(model_path=nonexistent_model)
+
+    assert classifier.is_trained is False
+
+    res = classifier.classify_leaf_disease(
+        image_input=dummy_leaf_image,
+        crop="Tomato",
+    )
+
+    assert res.supported is False
+    assert res.disease is None
+    assert res.status == "needs_training_data"
+    assert "not loaded" in res.status_reason.lower() or "missing" in res.status_reason.lower()
+    assert res.photo_guidance is not None
+    assert res.predictions == []
+
+
+def test_pest_detector_missing_checkpoint_abstains_safely(tmp_path, dummy_leaf_image):
+    """Verify PestDetector safely abstains when pest checkpoint is missing."""
+    nonexistent_pest_model = tmp_path / "nonexistent_pest.pt"
+    detector = PestDetector(model_path=nonexistent_pest_model)
+
+    assert detector.is_trained is False
+
+    res = detector.detect_pest(
+        image_input=dummy_leaf_image,
+        crop="Tomato",
+        viewpoint="leaf",
+        user_text="Are there two-spotted spider mites on this leaf?",
+    )
+
+    assert res.supported is False
+    assert res.pest_label is None
+    assert res.metadata["chemical_pesticides_withheld"] is True
+    assert res.photo_guidance is not None
+
+
+def test_modular_pipeline_missing_model_abstains_cleanly(tmp_path, dummy_leaf_image):
+    """Verify full ModularCropVisionPipeline handles missing models gracefully without crashing."""
+    nonexistent_model = tmp_path / "nonexistent_model.pt"
+    mock_disease_classifier = ModularDiseaseClassifier(model_path=nonexistent_model)
+    pipeline = ModularCropVisionPipeline(disease_classifier=mock_disease_classifier)
+
+    res = pipeline.diagnose(
+        image_input=dummy_leaf_image,
+        crop_hint="Tomato",
+        viewpoint_hint="leaf",
+    )
+
+    assert res.plant_detected is True
+    assert res.crop == "Tomato"
+    assert res.supported is False
+    assert res.disease is None
+    assert res.status == "needs_training_data"
+    assert res.photo_guidance is not None
+
+
+def test_dedicated_pest_detector_verified_tomato_spider_mite_inference(dummy_leaf_image):
+    """Verify dedicated pest detector loads verified checkpoint and infers cleanly."""
+    detector = PestDetector()
+
+    if detector.is_trained:
+        assert len(detector.verified_pest_classes) >= 2
+        assert any("spider mite" in c.lower() for c in detector.verified_pest_classes)
+        assert any("healthy" in c.lower() for c in detector.verified_pest_classes)
+
+        res = detector.detect_pest(
+            image_input=dummy_leaf_image,
+            crop="Tomato",
+            viewpoint="leaf",
+            user_text="Check leaf for spider mites",
+        )
+        assert res.pest_suspected is True
+        assert res.status in ["pest_detected", "pest_guidance_provided"]
+        assert res.photo_guidance is not None
+

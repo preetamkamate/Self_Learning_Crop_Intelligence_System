@@ -693,26 +693,34 @@ class AdvisorySynthesisService:
                     f"{source_box_kn}"
                 )
             else:
+                chem_withheld = vision.get("chemical_treatment_withheld", False) or (conf < 70.0)
+                if chem_withheld:
+                    chem_sec_en = "- **Chemical Treatment**: 🛑 *Safely Withheld (Experimental tier / confidence below strict release threshold). Consult your nearest KVK for physical verification before purchasing or spraying chemicals.*"
+                    chem_sec_kn = "- **ರಾಸಾಯನಿಕ ಸಿಂಪಡಣೆ**: 🛑 *ಸುರಕ್ಷಿತವಾಗಿ ತಡೆಹಿಡಿಯಲಾಗಿದೆ (ಪ್ರಾಯೋಗಿಕ ಮಾದರಿ / ವಿಶ್ವಾಸಾರ್ಹತೆಯು ಮಿತಿಗಿಂತ ಕಡಿಮೆಯಿದೆ). ಔಷಧ ಸಿಂಪಡಿಸುವ ಮುನ್ನ ಸ್ಥಳೀಯ ಕೆವಿಕೆ ಅಥವಾ ಕೃಷಿ ಅಧಿಕಾರಿಗಳನ್ನು ಸಂಪರ್ಕಿಸಿ.*"
+                else:
+                    chem_sec_en = f"- **Chemical Treatment**: {treatments['chemical_en']}\n*Follow 7-day pre-harvest interval (PHI) and wear protective gear.*"
+                    chem_sec_kn = f"- **ರಾಸಾಯನಿಕ ಸಿಂಪಡಣೆ**: {treatments['chemical_kn']}\n*ಔಷಧಿ ಸಿಂಪಡಿಸುವಾಗ ಮುಖಗವಸು ಧರಿಸಿ ಮತ್ತು 7 ದಿನಗಳ ಕಾಯುವ ಅವಧಿಯನ್ನು ಪಾಲಿಸಿ.*"
+
                 en = (
-                    f"### 🔬 Validated Probable Diagnosis: **{top1_en}** ({conf:.1f}% Confidence)\n\n"
+                    f"### 🔬 Experimental Observation (58.33% Held-Out Accuracy): **{top1_en}** ({conf:.1f}% Confidence)\n\n"
+                    f"⚠️ *Experimental Research Preview — Never treat as a certified laboratory diagnosis.*\n"
                     f"- **Kannada**: {top1_kn}\n"
                     f"- **Affected Plant Region**: 📍 {aff_reg}\n\n"
                     f"**Immediate Management (ICAR/IIHR Protocol):**\n"
                     f"- **Organic / Bio-control**: {treatments['organic_en']}\n"
-                    f"- **Chemical Treatment**: {treatments['chemical_en']}\n"
+                    f"{chem_sec_en}\n"
                     f"- **Cultural Action**: {treatments['cultural_en']}\n\n"
-                    f"*Follow 7-day pre-harvest interval (PHI) for chemical sprays.*\n\n"
                     f"{source_box_en}"
                 )
                 kn = (
-                    f"### 🔬 ದೃಢೀಕೃತ ರೋಗ ಪತ್ತೆ (Validated Probable Diagnosis): **{top1_kn}** (ಖಚಿತತೆ: {conf:.1f}%)\n\n"
+                    f"### 🔬 ಪ್ರಾಯೋಗಿಕ ವೀಕ್ಷಣೆ (Experimental — 58.33% ನಿಖರತೆ): **{top1_kn}** (ಖಚಿತತೆ: {conf:.1f}%)\n\n"
+                    f"⚠️ *ಪ್ರಾಯೋಗಿಕ ಸಂಶೋಧನಾ ಮಾದರಿ — ಅಧಿಕೃತ ಪ್ರಯೋಗಾಲಯ ರೋಗನಿರ್ಣಯವೆಂದು ಪರಿಗಣಿಸಬೇಡಿ.*\n"
                     f"- **ಇಂಗ್ಲಿಷ್ ಹೆಸರು**: {top1_en}\n"
                     f"- **ಬಾಧಿತ ಭಾಗ**: 📍 {aff_reg_kn}\n\n"
                     f"**ನಿರ್ವಹಣಾ ಕ್ರಮಗಳು (ICAR / IIHR ಶಿಫಾರಸು):**\n"
                     f"- **ಜೈವಿಕ / ಸಾವಯವ ನಿಯಂತ್ರಣ**: {treatments['organic_kn']}\n"
-                    f"- **ರಾಸಾಯನಿಕ ಸಿಂಪಡಣೆ**: {treatments['chemical_kn']}\n"
+                    f"{chem_sec_kn}\n"
                     f"- **ಮುನ್ನೆಚ್ಚರಿಕೆ**: {treatments['cultural_kn']}\n\n"
-                    f"*ಔಷಧಿ ಸಿಂಪಡಿಸುವಾಗ ಮುಖಗವಸು ಧರಿಸಿ ಮತ್ತು ಕಾಯುವ ಅವಧಿಯನ್ನು ಪಾಲಿಸಿ.*\n\n"
                     f"{source_box_kn}"
                 )
 
@@ -827,6 +835,21 @@ class AdvisorySynthesisService:
         if self.client:
             llm_res = self._generate_with_gemini(router_payload, language=language)
             if llm_res and llm_res.get("en"):
+                # Ensure authoritative primary source evidence is attached if available and not already in text
+                vision = router_payload.get("vision_result")
+                if vision and vision.get("source_evidence"):
+                    s_ev = vision.get("source_evidence")
+                    url = s_ev.get("url") if isinstance(s_ev, dict) else ""
+                    if url and url not in llm_res["en"]:
+                        src_en = self._format_source_evidence_markdown(s_ev, lang="en")
+                        llm_res["en"] = f"{llm_res['en']}\n\n{src_en}"
+                    if url and url not in llm_res["kn"]:
+                        src_kn = self._format_source_evidence_markdown(s_ev, lang="kn")
+                        llm_res["kn"] = f"{llm_res['kn']}\n\n{src_kn}"
+                    if language == "kn":
+                        llm_res["chosen_response"] = llm_res["kn"]
+                    else:
+                        llm_res["chosen_response"] = llm_res["en"]
                 return llm_res
 
         # CHANGED: Seamless local rule-based synthesis fallback
