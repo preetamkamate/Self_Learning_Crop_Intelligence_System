@@ -95,7 +95,7 @@ def test_crop_identifier_verified_dataset_status():
         assert "leaf" in res.supported_viewpoints
 
     # Unsupported agricultural crops (recognized but not in verified training split)
-    for crop in ["Grape", "Potato", "Citrus", "Banana", "Wheat"]:
+    for crop in ["Cotton", "Banana", "Sugarcane", "Wheat", "Rice"]:
         res = identifier.identify_crop(crop_hint=crop)
         assert res.is_verified_dataset_crop is False
         assert res.canonical_name == identifier.normalize_crop_name(crop)
@@ -128,7 +128,10 @@ def test_viewpoint_router_normalizes_all_6_viewpoints():
         "stalk": "stem_branch",
         "cane": "stem_branch",
         "twig": "stem_branch",
-        "bark": "stem_branch",
+        # Bark / Trunk
+        "bark": "bark_trunk",
+        "trunk": "bark_trunk",
+        "bark_trunk": "bark_trunk",
         # 3. Fruit
         "fruit": "fruit",
         "pod": "fruit",
@@ -162,28 +165,25 @@ def test_viewpoint_router_normalizes_all_6_viewpoints():
 
 
 def test_viewpoint_router_route_gating():
-    """Verify route gating across verified leaf vs. non-leaf viewpoints."""
+    """Verify route gating across verified vs unverified viewpoints."""
     router = ViewpointRouter()
 
-    # Leaf on verified crop (Tomato) must be supported
-    res_leaf = router.route_viewpoint(crop="Tomato", viewpoint_hint="leaf")
-    assert res_leaf.is_supported_route is True
-    assert res_leaf.canonical_viewpoint == "leaf"
-    assert res_leaf.requires_photo_guidance is False
+    # Supported viewpoints on verified crops must be supported
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="leaf").is_supported_route is True
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="whole_plant").is_supported_route is True
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="canopy").is_supported_route is True
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="stem_branch").is_supported_route is True
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="fruit").is_supported_route is True
 
-    # All non-leaf viewpoints on Tomato must be unsupported and require photo guidance
-    non_leaf_views = ["stem_branch", "fruit", "canopy", "whole_plant", "root"]
-    for vp in non_leaf_views:
-        res = router.route_viewpoint(crop="Tomato", viewpoint_hint=vp)
-        assert res.is_supported_route is False, f"Viewpoint {vp} was unexpectedly marked supported!"
-        assert res.canonical_viewpoint == vp
-        assert res.requires_photo_guidance is True
-        assert "not trained yet" in res.status_reason
+    # Unverified combinations must be unsupported and require photo guidance
+    assert router.route_viewpoint(crop="Tomato", viewpoint_hint="root").is_supported_route is False
+    assert router.route_viewpoint(crop="Cassava", viewpoint_hint="stem_branch").is_supported_route is False
+    assert router.route_viewpoint(crop="Corn (Maize)", viewpoint_hint="root").is_supported_route is False
 
-    # Any viewpoint on an unsupported crop (e.g. Grape) must be unsupported
-    res_grape = router.route_viewpoint(crop="Grape", viewpoint_hint="leaf")
-    assert res_grape.is_supported_route is False
-    assert res_grape.requires_photo_guidance is True
+    # Any viewpoint on an unsupported crop (e.g. Cotton) must be unsupported
+    res_cotton = router.route_viewpoint(crop="Cotton", viewpoint_hint="leaf")
+    assert res_cotton.is_supported_route is False
+    assert res_cotton.requires_photo_guidance is True
 
 
 # ==============================================================================
@@ -290,42 +290,34 @@ def test_modular_pipeline_verified_leaf_route(dummy_leaf_image):
     assert "corn" not in result.top1_label.lower()
 
 
-def test_modular_pipeline_non_leaf_viewpoints_abstain_with_photo_guidance(dummy_leaf_image):
-    """
-    Assert that all 5 non-leaf viewpoints (stem_branch, fruit, canopy, whole_plant, root)
-    SAFELY ABSTAIN from disease diagnosis and provide honest photo guidance.
-    """
+def test_modular_pipeline_deployed_multipart_routes(dummy_leaf_image):
+    """Assert that verified routes (leaf, etc.) diagnose successfully and unsupported abstain."""
     pipeline = ModularCropVisionPipeline()
 
-    non_leaf_views = ["stem_branch", "fruit", "canopy", "whole_plant", "root"]
+    res = pipeline.diagnose(
+        image_input=dummy_leaf_image,
+        crop_hint="Tomato",
+        viewpoint_hint="leaf",
+    )
+    assert res.plant_detected is True
+    assert res.supported is True
 
-    for vp in non_leaf_views:
-        result = pipeline.diagnose(
-            image_input=dummy_leaf_image,
-            crop_hint="Tomato",
-            viewpoint_hint=vp,
-        )
-
-        # 1. Must never predict a disease
-        assert result.supported is False, f"Viewpoint {vp} was unexpectedly marked supported!"
-        assert result.disease is None, f"Viewpoint {vp} predicted a disease: {result.disease}!"
-        assert result.predictions == []
-
-        # 2. Must return honest photo guidance
-        assert result.photo_guidance is not None, f"Viewpoint {vp} missing photo guidance!"
-        assert "instructions_en" in result.photo_guidance
-        assert "instructions_kn" in result.photo_guidance
-        assert len(result.photo_guidance["checklist"]) > 0
-
-        # 3. Status reason must clearly explain abstention
-        assert "not trained yet" in result.fallback_reason.lower() or "withheld" in result.fallback_reason.lower()
+    # Truly unsupported organ combinations must safely abstain with photo guidance
+    res_unsupp = pipeline.diagnose(
+        image_input=dummy_leaf_image,
+        crop_hint="Tomato",
+        viewpoint_hint="root",
+    )
+    assert res_unsupp.supported is False
+    assert res_unsupp.disease is None
+    assert res_unsupp.photo_guidance is not None
 
 
 def test_modular_pipeline_unsupported_crop_abstains_with_guidance(dummy_leaf_image):
-    """Assert that unsupported crops (e.g. Grape, Potato, Citrus) safely abstain."""
+    """Assert that unsupported crops (e.g. Cotton, Banana, Sugarcane) safely abstain."""
     pipeline = ModularCropVisionPipeline()
 
-    for crop in ["Grape", "Potato", "Citrus"]:
+    for crop in ["Cotton", "Banana", "Sugarcane"]:
         result = pipeline.diagnose(
             image_input=dummy_leaf_image,
             crop_hint=crop,

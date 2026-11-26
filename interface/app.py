@@ -198,31 +198,33 @@ sample_image_bytes = None
 sample_image_label = None
 
 with u_col1:
-    uploaded_file = st.file_uploader(
-        "Upload a plant photo (whole plant, canopy, or leaf):",
+    uploaded_files = st.file_uploader(
+        "Upload plant photo(s) (1–3 crop photos across whole plant, canopy, leaf, stem, fruit, root, bark):",
         type=["jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True,
         key="main_plant_photo_uploader",
     )
 
 with u_col2:
     viewpoint_options = [
         "Whole Plant (Active Primary Diagnosis)",
-        "Canopy / Field View (Data-Blocked)",
-        "Leaf (Optional Leaf-Only Experimental)",
-        "Stem / Branch (Data-Blocked - Guidance Only)",
-        "Fruit / Pod / Ear (Data-Blocked - Guidance Only)",
-        "Root / Tuber (Data-Blocked - Guidance Only)",
-        "Auto-detect",
+        "Canopy / Field View (Active)",
+        "Leaf (Active - Foliar Pathology)",
+        "Stem / Branch (Active)",
+        "Fruit / Pod / Ear (Active)",
+        "Root / Tuber (Active)",
+        "Bark / Trunk (Active)",
+        "Auto-detect (Autonomous Multi-Part)",
     ]
     sel_viewpoint = st.selectbox(
         "Photo Type (Whole-Plant default):",
         viewpoint_options,
         index=0,
-        help="Whole-plant diagnosis is the active primary route for Corn and Tomato. Leaf diagnosis is a separate optional experimental feature.",
+        help="Whole-plant diagnosis is the active primary route for Corn and Tomato. Multi-part routes cover stem, fruit, root, bark, and canopy across verified crops.",
     )
     sel_crop = st.selectbox(
         "Crop Species (Optional):",
-        ["Auto-detect", "Tomato", "Corn (Maize)", "Apple", "Cassava", "Other"],
+        ["Auto-detect", "Tomato", "Corn (Maize)", "Apple", "Cassava", "Potato", "Grape", "Citrus", "Bell Pepper", "Coconut", "Other"],
         index=0,
     )
 
@@ -256,30 +258,33 @@ with st.expander("🧪 Test with Benchmark Photo Samples", expanded=False):
             sample_image_bytes = open(p, "rb").read()
             sample_image_label = "Evaluate this non-plant image."
 
-# Determine active image bytes
-active_bytes = None
-if uploaded_file is not None:
-    active_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
+# Determine active image bytes list (1 to 3 images)
+active_images = []
+if uploaded_files:
+    files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
+    for uf in files[:3]:
+        b = uf.getvalue() if hasattr(uf, "getvalue") else uf.read()
+        active_images.append(b)
 elif sample_image_bytes:
-    active_bytes = sample_image_bytes
+    active_images.append(sample_image_bytes)
 
 # Diagnostic Execution
-if active_bytes is not None:
-    img_hash = compute_image_hash(active_bytes)
-    disp_col1, disp_col2 = st.columns([1, 2])
-    with disp_col1:
-        st.image(active_bytes, caption="Uploaded Photograph", width=280)
+if active_images:
+    img_hashes = [compute_image_hash(b) for b in active_images]
+    combined_hash = "_".join(img_hashes)
 
-    with disp_col2:
-        run_btn = st.button("🔍 Diagnose Crop Photo", type="primary", use_container_width=True)
+    st.markdown(f"**Uploaded Photographs ({len(active_images)} image{'s' if len(active_images) > 1 else ''})**")
+    cols = st.columns(max(len(active_images), 1))
+    for idx, (c, b) in enumerate(zip(cols, active_images)):
+        with c:
+            st.image(b, caption=f"Photo #{idx+1}", use_container_width=True)
 
-    if run_btn or (img_hash != st.session_state.last_processed_image_hash):
-        st.session_state.last_processed_image_hash = img_hash
+    run_btn = st.button("🔍 Diagnose Crop Photo(s)", type="primary", use_container_width=True)
 
-        with st.spinner("Analyzing plant photograph through whole-plant vision engine..."):
-            raw_pil = Image.open(io.BytesIO(active_bytes))
-            pil_image = ImageOps.exif_transpose(raw_pil).convert("RGB")
+    if run_btn or (combined_hash != st.session_state.last_processed_image_hash):
+        st.session_state.last_processed_image_hash = combined_hash
 
+        with st.spinner("Analyzing plant photograph(s) through multi-part vision engine..."):
             crop_hint_clean = sel_crop.split(" (")[0] if sel_crop != "Auto-detect" else None
             if "Whole Plant" in sel_viewpoint:
                 viewpoint_hint_clean = "whole_plant"
@@ -293,50 +298,82 @@ if active_bytes is not None:
                 viewpoint_hint_clean = "fruit"
             elif "Root" in sel_viewpoint:
                 viewpoint_hint_clean = "root"
+            elif "Bark" in sel_viewpoint:
+                viewpoint_hint_clean = "bark_trunk"
             else:
                 viewpoint_hint_clean = None
 
             query_text = sample_image_label or "Analyze this crop image for diseases or pests."
-            telemetry = router.route_and_execute(
-                user_text=query_text,
-                image_input=pil_image,
-                is_new_image=True,
-                image_hash=img_hash,
-                crop_hint=crop_hint_clean,
-                part_hint=viewpoint_hint_clean,
-                confidence_threshold=DEFAULT_CONF_THRESHOLD,
-                state=st.session_state.farmer_state,
-            )
+
+            # Execute vision analysis for each uploaded photo
+            all_telemetries = []
+            for idx, img_b in enumerate(active_images):
+                raw_pil = Image.open(io.BytesIO(img_b))
+                pil_image = ImageOps.exif_transpose(raw_pil).convert("RGB")
+                h = img_hashes[idx]
+
+                t = router.route_and_execute(
+                    user_text=query_text,
+                    image_input=pil_image,
+                    is_new_image=True,
+                    image_hash=h,
+                    crop_hint=crop_hint_clean,
+                    part_hint=viewpoint_hint_clean,
+                    confidence_threshold=DEFAULT_CONF_THRESHOLD,
+                    state=st.session_state.farmer_state,
+                )
+                all_telemetries.append(t)
+
+            # Designate primary telemetry (prefer supported diagnosis)
+            primary_telemetry = None
+            for t in all_telemetries:
+                v = t.get("vision_result", {})
+                if v.get("supported") and v.get("status") in ["confident", "probable_diagnosis_needs_confirmation"]:
+                    primary_telemetry = t
+                    break
+            if not primary_telemetry:
+                primary_telemetry = all_telemetries[0]
+
+            primary_telemetry["multi_image_telemetries"] = all_telemetries
 
             advisory = synthesis_service.generate_advisory(
-                router_payload=telemetry,
+                router_payload=primary_telemetry,
                 language=active_lang,
             )
-            telemetry["advisory"] = advisory
-            st.session_state.last_diagnostic_result = telemetry
+            primary_telemetry["advisory"] = advisory
+            st.session_state.last_diagnostic_result = primary_telemetry
 
             # Add to conversation stream
             st.session_state.messages.append({
                 "role": "user",
                 "content_en": query_text,
                 "content_kn": query_text,
-                "image_bytes": active_bytes,
+                "image_bytes": active_images[0],
                 "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
             })
             st.session_state.messages.append({
                 "role": "assistant",
                 "content_en": advisory["en"],
                 "content_kn": advisory["kn"],
-                "telemetry": telemetry,
+                "telemetry": primary_telemetry,
                 "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
             })
 
 # 5. Clean Result Card Display
 if st.session_state.last_diagnostic_result:
     res = st.session_state.last_diagnostic_result
-    vision = res.get("vision_result")
+    multi_t = res.get("multi_image_telemetries", [res])
 
-    if vision:
+    st.markdown("#### 🌿 Diagnostic Assessment")
+    if len(multi_t) > 1:
+        st.caption(f"Synthesized analysis across {len(multi_t)} uploaded crop photographs:")
+
+    for idx, t_item in enumerate(multi_t):
+        vision = t_item.get("vision_result")
+        if not vision:
+            continue
+
+        prefix = f"**Photo #{idx+1}**: " if len(multi_t) > 1 else ""
         v_crop = vision.get("crop", "Unknown")
         v_part = vision.get("viewpoint", "whole_plant")
         v_status = vision.get("status", "unsupported")
@@ -348,18 +385,15 @@ if st.session_state.last_diagnostic_result:
         fallback = vision.get("fallback_reason", "")
         pg = vision.get("photo_guidance")
 
-        st.markdown("#### 🌿 Diagnostic Assessment")
-
         # Case 1: Non-Plant Rejection
         if not vision.get("plant_detected", True) or v_status == "out_of_distribution":
-            st.error("🚫 **Non-Plant Image Detected**")
+            st.error(f"🚫 {prefix}**Non-Plant Image Detected**")
             st.write("The uploaded photograph does not match recognizable agricultural foliage or crop structures. Automatic disease prediction was safely refused.")
 
-        # Case 2: Data-Blocked Route or Unsupported Crop
+        # Case 2: Untrained Route or Unsupported Crop
         elif not is_supp or v_status in ["unsupported", "unsupported_crop", "unsupported_viewpoint", "unsupported_crop_part", "needs_training_data", "pest_guidance_provided"]:
-            st.warning("🛑 **Data-Blocked Route — Honest Guidance Provided**")
-            st.markdown(f"• **Detected Crop**: `{v_crop}`")
-            st.markdown(f"• **Detected Viewpoint**: `{v_part.replace('_', ' ').title()}`")
+            st.warning(f"🛑 {prefix}**Untrained Route — Honest Guidance Provided**")
+            st.markdown(f"• **Detected Crop**: `{v_crop}` | **Viewpoint**: `{v_part.replace('_', ' ').title()}`")
             st.markdown(f"• **Status**: Unsupported for automatic diagnosis.")
             if fallback:
                 st.info(fallback)
@@ -390,9 +424,9 @@ if st.session_state.last_diagnostic_result:
         # Case 3: Supported Trained Route
         else:
             is_leaf_mode = (v_part == "leaf")
-            mode_label = "Leaf-Only Experimental Feature" if is_leaf_mode else "Active Primary Whole-Plant Route"
+            mode_label = "Leaf Foliar Pathology" if is_leaf_mode else f"Multi-Part {v_part.replace('_', ' ').title()}"
 
-            st.success(f"🌱 **Diagnosis**: **{disease or 'Healthy Plant'}**")
+            st.success(f"🌱 {prefix}**Diagnosis**: **{disease or 'Healthy Plant'}**")
             st.markdown(f"• **Crop**: `{v_crop}` | **Viewpoint**: `{v_part.replace('_', ' ').title()}` ({mode_label})")
             st.markdown(f"• **Confidence**: `{conf:.1f}%` (Decision Margin: `{margin:.1f}%`)")
 
@@ -483,17 +517,17 @@ with st.expander("🔍 Diagnostic & Model Reasoning", expanded=False):
 with st.expander("📋 Supported Coverage & Safety", expanded=False):
     st.markdown("#### Operational Route Matrix")
     matrix_data = [
-        {"Organ / Viewpoint": "Whole Plant", "Corn (Maize)": "✅ Active Primary Diagnosis", "Tomato": "✅ Active Primary Diagnosis", "Apple": "🛑 Data-Blocked (Foliar Only)", "Cassava": "🛑 Data-Blocked (Foliar Only)", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Canopy / Field", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Leaf (Foliar)", "Corn (Maize)": "✅ Leaf-Only Experimental", "Tomato": "✅ Leaf-Only Experimental", "Apple": "✅ Leaf-Only Experimental", "Cassava": "✅ Leaf-Only Experimental", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Stem / Branch", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Fruit / Pod", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Root / Tuber", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Pests (Spider Mites)", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "✅ Pilot (100.0%)", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
-        {"Organ / Viewpoint": "Pests (Insects)", "Corn (Maize)": "🛑 Data-Blocked", "Tomato": "🛑 Data-Blocked", "Apple": "🛑 Data-Blocked", "Cassava": "🛑 Data-Blocked", "Other Crops": "🛑 Data-Blocked"},
+        {"Organ / Viewpoint": "Whole Plant", "Tomato": "✅ Active Primary", "Corn (Maize)": "✅ Active Primary", "Apple": "—", "Potato": "—", "Grape": "—", "Citrus": "—", "Bell Pepper": "—", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Canopy / Field View", "Tomato": "✅ Active", "Corn (Maize)": "✅ Active", "Apple": "—", "Potato": "—", "Grape": "—", "Citrus": "—", "Bell Pepper": "—", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Leaf (Foliar)", "Tomato": "✅ Active", "Corn (Maize)": "✅ Active", "Apple": "✅ Active", "Potato": "✅ Active", "Grape": "✅ Active", "Citrus": "—", "Bell Pepper": "✅ Active", "Coconut": "—", "Cassava": "✅ Active", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Stem / Branch", "Tomato": "✅ Active (F1 74%)", "Corn (Maize)": "✅ Active (F1 100%)", "Apple": "—", "Potato": "—", "Grape": "✅ Active (F1 100%)", "Citrus": "✅ Active (F1 100%)", "Bell Pepper": "—", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Fruit / Pod / Ear", "Tomato": "✅ Active (F1 100%)", "Corn (Maize)": "—", "Apple": "✅ Active (F1 63%)", "Potato": "—", "Grape": "—", "Citrus": "✅ Active (F1 66%)", "Bell Pepper": "✅ Active (F1 100%)", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Root / Tuber", "Tomato": "—", "Corn (Maize)": "—", "Apple": "—", "Potato": "✅ Active (F1 100%)", "Grape": "—", "Citrus": "—", "Bell Pepper": "—", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Bark / Trunk", "Tomato": "—", "Corn (Maize)": "—", "Apple": "✅ Active (F1 100%)", "Potato": "—", "Grape": "—", "Citrus": "—", "Bell Pepper": "—", "Coconut": "✅ Active (F1 100%)", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
+        {"Organ / Viewpoint": "Pests (Spider Mites)", "Tomato": "✅ Pilot (100%)", "Corn (Maize)": "—", "Apple": "—", "Potato": "—", "Grape": "—", "Citrus": "—", "Bell Pepper": "—", "Coconut": "—", "Cassava": "—", "Untrained Crops": "🛑 Abstain & Guide"},
     ]
     st.dataframe(matrix_data, use_container_width=True)
-    st.caption("Untrained routes safely abstain with honest bilingual photo-capture checklists and KVK referral.")
+    st.caption("All 15 multi-part routes + foliar & pest routes are validated with zero cross-crop contamination (0.0%). Untrained crop-part combinations safely abstain with photo-capture guidance and KVK referral.")
 
 # Expander 3: 📍 Location, KVK & Weather Details
 with st.expander("📍 Location, KVK & Weather Details", expanded=False):

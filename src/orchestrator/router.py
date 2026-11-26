@@ -266,7 +266,15 @@ class AutonomousRouter:
 
         # 5. RAG Retrieval Module: Retrieve specific agronomic guidelines
         rag_query = ""
-        if has_new_image and vision_result and vision_result.get("status") == "confident":
+        is_supported_or_confident = (
+            vision_result
+            and (
+                vision_result.get("supported") is True
+                or vision_result.get("status") in ["confident", "probable_diagnosis_needs_confirmation"]
+            )
+        )
+        if has_new_image and is_supported_or_confident:
+            top_diag = vision_result.get("top1_label") or vision_result.get("disease", "")
             # CHANGED: When image and specific text are submitted together, combine diagnosis with farmer query
             generic_prompts = [
                 "analyze this plant image and identify any health issues or diseases.",
@@ -279,11 +287,12 @@ class AutonomousRouter:
             ]
             clean_text = user_text.strip().lower()
             if clean_text and clean_text not in generic_prompts:
-                rag_query = f"{vision_result['top1_label']} {user_text} ICAR symptoms remedy chemical dosage"
+                rag_query = f"{top_diag} {user_text} ICAR symptoms remedy chemical dosage"
             else:
-                rag_query = f"{vision_result['top1_label']} ICAR symptoms, organic remedy and chemical dosage"
-        elif is_followup and vision_result and vision_result.get("status") == "confident":
-            rag_query = f"{vision_result['top1_label']} {user_text} ICAR dosage treatment"
+                rag_query = f"{top_diag} ICAR symptoms, organic remedy and chemical dosage"
+        elif is_followup and is_supported_or_confident:
+            top_diag = vision_result.get("top1_label") or vision_result.get("disease", "")
+            rag_query = f"{top_diag} {user_text} ICAR dosage treatment"
         elif wants_crop_rec and tabular_result:
             # CHANGED: Retrieve crop-specific agronomic practices tailored to district and agro-climatic zone
             rag_query = f"{tabular_result['top_crop']} cultivation practices soil climate ICAR {state.profile.district}"

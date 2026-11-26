@@ -15,10 +15,15 @@ logger = logging.getLogger(__name__)
 
 # Crops with verified real labeled training datasets and checkpoints
 VERIFIED_DATASET_CROPS = {
-    "Apple": ["leaf"],
+    "Tomato": ["leaf", "whole_plant", "canopy", "stem_branch", "fruit"],
+    "Corn (Maize)": ["leaf", "whole_plant", "canopy", "stem_branch"],
+    "Apple": ["leaf", "fruit", "bark_trunk"],
+    "Potato": ["leaf", "root"],
+    "Grape": ["leaf", "stem_branch"],
+    "Citrus": ["stem_branch", "fruit"],
+    "Bell Pepper (Capsicum)": ["leaf", "fruit"],
+    "Coconut": ["bark_trunk"],
     "Cassava": ["leaf"],
-    "Corn (Maize)": ["leaf"],
-    "Tomato": ["leaf"],
 }
 
 # Broader agricultural crop taxonomy

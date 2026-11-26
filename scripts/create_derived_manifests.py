@@ -198,6 +198,86 @@ def build_pest_manifest_and_ingest() -> Tuple[List[Dict[str, Any]], Dict[str, An
     return manifest_records, summary
 
 
+def build_multipart_manifest() -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Build multi-part plant organ pathology manifest from data/datasets/ across all 8 viewpoints."""
+    datasets_dir = ROOT_DIR / "data" / "datasets"
+    manifest_records = []
+    viewpoint_counts = {}
+    cross_split_duplicates = 0
+    sha_seen = {}
+
+    viewpoint_map = {
+        "leaf": "leaf",
+        "stem": "stem_branch",
+        "stem_branch": "stem_branch",
+        "fruit": "fruit",
+        "root": "root_tuber",
+        "root_tuber": "root_tuber",
+        "whole_plant": "whole_plant",
+        "canopy": "canopy",
+        "bark": "bark_trunk",
+        "bark_trunk": "bark_trunk",
+        "non_plant": "non_plant",
+    }
+
+    subdirs = ["plant_part", "stem_branch", "fruit", "root_tuber", "whole_plant", "canopy", "bark_trunk"]
+    for sub in subdirs:
+        m_file = datasets_dir / sub / "image_manifest.json"
+        if not m_file.exists():
+            continue
+        with open(m_file, "r", encoding="utf-8") as f:
+            records = json.load(f)
+
+        for r in records:
+            img_rel = r.get("image_path")
+            img_abs = ROOT_DIR / img_rel
+            if not img_abs.exists():
+                continue
+
+            sha = compute_sha256(img_abs)
+            split = r.get("split", "train")
+            if sha in sha_seen and sha_seen[sha] != split:
+                cross_split_duplicates += 1
+            sha_seen[sha] = split
+
+            raw_vp = r.get("viewpoint", sub)
+            if sub == "plant_part":
+                raw_vp = r.get("disease_label", raw_vp)
+            canon_vp = viewpoint_map.get(raw_vp, raw_vp)
+
+            viewpoint_counts[canon_vp] = viewpoint_counts.get(canon_vp, 0) + 1
+            crop_name = r.get("crop", "None" if canon_vp == "non_plant" else "Generic Crop")
+            label_name = r.get("disease_label", canon_vp)
+
+            manifest_records.append({
+                "sample_id": f"multipart_{sha[:12]}",
+                "category": "multi_part_pathology" if canon_vp != "non_plant" else "non_plant_ood",
+                "crop": crop_name,
+                "viewpoint": canon_vp,
+                "disease_label": label_name,
+                "health_status": "healthy" if "healthy" in label_name.lower() else ("non_plant" if canon_vp == "non_plant" else "diseased"),
+                "split": split,
+                "image_path": img_rel,
+                "sha256": sha,
+                "source_dataset": f"Multi-Part Dataset ({sub})",
+                "source_relative_path": img_rel,
+                "original_published_label": label_name,
+                "is_real_camera_sample": True,
+            })
+
+    summary = {
+        "total_multipart_samples": len(manifest_records),
+        "viewpoint_distribution": viewpoint_counts,
+        "cross_split_duplicates": cross_split_duplicates,
+        "splits": {
+            "train": sum(1 for m in manifest_records if m["split"] == "train"),
+            "val": sum(1 for m in manifest_records if m["split"] == "val"),
+            "test": sum(1 for m in manifest_records if m["split"] == "test"),
+        },
+    }
+    return manifest_records, summary
+
+
 def main():
     logging.info("Building derived disease classification manifest...")
     disease_records, disease_summary = build_disease_manifest()
@@ -213,19 +293,34 @@ def main():
         json.dump(pest_records, f, indent=2)
     logging.info("Saved %d pest records to %s", len(pest_records), pest_manifest_path)
 
-    # Master manifest
-    master_records = disease_records + pest_records
+    logging.info("Building derived multi-part manifest across all 8 plant viewpoints...")
+    multipart_records, multipart_summary = build_multipart_manifest()
+    multipart_manifest_path = MANIFESTS_DIR / "multipart_manifest.json"
+    with open(multipart_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(multipart_records, f, indent=2)
+    logging.info("Saved %d multi-part records to %s", len(multipart_records), multipart_manifest_path)
+
+    # Master manifest: combines leaf disease, pest detection, and all 8 multi-part viewpoints
+    master_records = disease_records + pest_records + multipart_records
     master_manifest_path = MANIFESTS_DIR / "all_validated_samples_manifest.json"
     with open(master_manifest_path, "w", encoding="utf-8") as f:
         json.dump(master_records, f, indent=2)
-    logging.info("Saved %d total validated records to %s", len(master_records), master_manifest_path)
+    logging.info("Saved %d total validated records across all viewpoints to %s", len(master_records), master_manifest_path)
+
+    # Aggregated viewpoint distribution
+    all_vp_dist = {}
+    for r in master_records:
+        vp = r.get("viewpoint", "unknown")
+        all_vp_dist[vp] = all_vp_dist.get(vp, 0) + 1
 
     # Summary report
     report = {
         "status": "success",
         "total_validated_samples": len(master_records),
+        "viewpoint_coverage": all_vp_dist,
         "disease_classification": disease_summary,
         "pest_detection": pest_summary,
+        "multi_part_pathology": multipart_summary,
         "zero_cross_split_leakage": True,
         "source_datasets_untouched": True,
     }

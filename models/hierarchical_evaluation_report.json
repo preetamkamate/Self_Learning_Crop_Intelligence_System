@@ -309,25 +309,15 @@
         "Potato with Late Blight"
       ]
     },
-    "whole_plant_view": {
-      "plant_part": "whole_plant",
-      "samples": 1,
-      "abstention_rate": 1.0,
-      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
-      "safe_refusal_compliant": true
+    "deployed_multipart": {
+      "samples": 6,
+      "diagnosis_rate": 0.8333,
+      "deployment_status": "DEPLOYED"
     },
-    "canopy_view": {
-      "plant_part": "canopy",
-      "samples": 1,
+    "unsupported_routes": {
+      "samples": 3,
       "abstention_rate": 1.0,
-      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
-      "safe_refusal_compliant": true
-    },
-    "non_foliar_parts": {
-      "plant_part": "stem",
-      "samples": 4,
-      "abstention_rate": 1.0,
-      "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
+      "deployment_status": "SAFE_ABSTENTION",
       "safe_refusal_compliant": true
     },
     "non_plant_ood": {

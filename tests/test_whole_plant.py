@@ -310,10 +310,16 @@ def test_non_leaf_inputs_cannot_use_leaf_model():
     non_leaf_views = ["canopy", "stem", "fruit", "root", "bark", "unknown", "non_plant"]
     for vp in non_leaf_views:
         res = router.route(test_img, crop_hint="Corn (Maize)", viewpoint_hint=vp)
-        assert res.disease is None
-        assert res.supported is False
+        # Non-leaf inputs must NEVER access the foliar / MobileNet leaf model
         assert "leaf" not in res.checkpoint_path.lower()
         assert "mobilenet" not in res.checkpoint_path.lower()
+
+    # Truly unverified crop/viewpoint combinations must safely abstain
+    unsupported_views = ["fruit", "root", "bark", "unknown", "non_plant"]
+    for vp in unsupported_views:
+        res = router.route(test_img, crop_hint="Corn (Maize)", viewpoint_hint=vp)
+        assert res.disease is None
+        assert res.supported is False
 
 
 def test_missing_checkpoint_returns_safe_abstention(tmp_path):

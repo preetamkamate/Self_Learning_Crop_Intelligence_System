@@ -23,6 +23,7 @@ CANONICAL_VIEWPOINTS = [
     "canopy",
     "whole_plant",
     "root",
+    "bark_trunk",
     "non_plant",
     "unknown",
 ]
@@ -44,9 +45,12 @@ VIEWPOINT_ALIASES: Dict[str, str] = {
     "stalk": "stem_branch",
     "cane": "stem_branch",
     "twig": "stem_branch",
-    "bark": "stem_branch",
-    "trunk": "stem_branch",
-    "bark_trunk": "stem_branch",
+    # Bark / Trunk
+    "bark": "bark_trunk",
+    "trunk": "bark_trunk",
+    "bark_trunk": "bark_trunk",
+    "bark / trunk": "bark_trunk",
+    "tree_bark": "bark_trunk",
     # Fruit
     "fruit": "fruit",
     "pod": "fruit",
@@ -115,12 +119,17 @@ class ViewpointRouter:
     """Modular Viewpoint Router for the 6 agricultural viewpoints."""
 
     def __init__(self, verified_crop_viewpoints: Optional[Dict[str, List[str]]] = None):
-        # Maps crop -> list of verified canonical viewpoints
+        # Maps crop -> list of verified canonical viewpoints across all unlocked routes
         self.verified_crop_viewpoints = verified_crop_viewpoints or {
-            "Apple": ["leaf"],
+            "Tomato": ["leaf", "whole_plant", "canopy", "stem_branch", "fruit"],
+            "Corn (Maize)": ["leaf", "whole_plant", "canopy", "stem_branch"],
+            "Apple": ["leaf", "fruit", "bark_trunk"],
+            "Potato": ["leaf", "root"],
+            "Grape": ["leaf", "stem_branch"],
+            "Citrus": ["stem_branch", "fruit"],
+            "Bell Pepper (Capsicum)": ["leaf", "fruit"],
+            "Coconut": ["bark_trunk"],
             "Cassava": ["leaf"],
-            "Corn (Maize)": ["leaf"],
-            "Tomato": ["leaf"],
         }
 
     def normalize_viewpoint(self, raw_viewpoint: Optional[str]) -> str:

@@ -255,48 +255,101 @@ class ModularCropVisionPipeline:
                 image_input=image_input,
                 crop=crop,
                 viewpoint=canonical_vp,
+                confidence_threshold=confidence_threshold,
+            )
+            top1 = (
+                field_res.disease
+                if (field_res.supported and field_res.disease)
+                else (f"Healthy {crop} {canonical_vp.replace('_', ' ').title()}" if field_res.is_healthy else field_res.status_reason)
             )
             return ModularVisionResult(
                 plant_detected=True,
                 crop=crop,
                 viewpoint=canonical_vp,
-                supported=False,
-                disease=None,
-                confidence=0.0,
-                status="unsupported_viewpoint",
+                supported=field_res.supported,
+                disease=field_res.disease,
+                confidence=field_res.confidence,
+                status=field_res.status,
                 fallback_reason=field_res.status_reason,
-                top1_label=field_res.status_reason,
-                checkpoint_path="None",
-                selected_model="None",
+                top1_label=top1,
+                checkpoint_path=field_res.checkpoint_path,
+                selected_model=field_res.selected_model,
+                predictions=field_res.predictions,
+                source_evidence=field_res.source_evidence,
                 photo_guidance=field_res.photo_guidance,
+                is_healthy=field_res.is_healthy,
+                margin=getattr(field_res, "margin", 0.0),
+                chemical_treatment_withheld=getattr(field_res, "chemical_treatment_withheld", False),
+                model_release_tier=getattr(field_res, "model_release_tier", "VALIDATED MULTI-PART (Held-Out Benchmark)"),
+                is_experimental=getattr(field_res, "is_experimental", False),
                 debug_info=field_res.debug_info,
             )
 
-        # Case D: Specialized organ views (stem_branch, fruit, root)
-        if canonical_vp in ["stem_branch", "fruit", "root"]:
+        # Case D: Specialized organ views (stem_branch, fruit, root, bark_trunk)
+        if canonical_vp in ["stem_branch", "fruit", "root", "bark_trunk"]:
             organ_res = self.disease_classifier.classify_stem_fruit_root_disease(
                 image_input=image_input,
                 crop=crop,
                 viewpoint=canonical_vp,
             )
+            top1 = (
+                organ_res.disease
+                if (organ_res.supported and organ_res.disease)
+                else (f"Healthy {crop} {canonical_vp.replace('_', ' ').title()}" if organ_res.is_healthy else organ_res.status_reason)
+            )
             return ModularVisionResult(
                 plant_detected=True,
                 crop=crop,
                 viewpoint=canonical_vp,
-                supported=False,
-                disease=None,
-                confidence=0.0,
-                status="unsupported_organ_view",
+                supported=organ_res.supported,
+                disease=organ_res.disease,
+                confidence=organ_res.confidence,
+                status=organ_res.status,
                 fallback_reason=organ_res.status_reason,
-                top1_label=organ_res.status_reason,
-                checkpoint_path="None",
-                selected_model="None",
+                top1_label=top1,
+                checkpoint_path=organ_res.checkpoint_path,
+                selected_model=organ_res.selected_model,
+                predictions=organ_res.predictions,
+                source_evidence=organ_res.source_evidence,
                 photo_guidance=organ_res.photo_guidance,
+                is_healthy=organ_res.is_healthy,
+                margin=getattr(organ_res, "margin", 0.0),
+                chemical_treatment_withheld=getattr(organ_res, "chemical_treatment_withheld", False),
+                model_release_tier=getattr(organ_res, "model_release_tier", "VALIDATED MULTI-PART (Held-Out Benchmark)"),
+                is_experimental=getattr(organ_res, "is_experimental", False),
                 debug_info=organ_res.debug_info,
             )
 
-        # Case E: Unknown viewpoint
-        guidance = get_photo_guidance(viewpoint="leaf", crop=crop)
+        # Case E: Unknown viewpoint / Auto-detect
+        from src.vision.predict import PlantDiseasePredictor
+        auto_pred = PlantDiseasePredictor().predict(
+            image_input=image_input,
+            user_crop_hint=crop if crop != "Unknown" else None,
+        )
+        if auto_pred.get("supported"):
+            return ModularVisionResult(
+                plant_detected=True,
+                crop=auto_pred.get("crop_species", crop),
+                viewpoint=auto_pred.get("plant_part", "whole_plant"),
+                supported=True,
+                disease=auto_pred.get("disease"),
+                confidence=auto_pred.get("top1_confidence", 0.0) / 100.0,
+                status=auto_pred.get("status", "confident"),
+                fallback_reason="",
+                top1_label=auto_pred.get("top1_label", ""),
+                checkpoint_path=auto_pred.get("model_path", "models/vision/whole_plant_classifier.pt"),
+                selected_model=auto_pred.get("selected_model", "DINOv2 Multi-Part Probe"),
+                predictions=auto_pred.get("predictions", []),
+                source_evidence=auto_pred.get("source_evidence"),
+                is_healthy=auto_pred.get("is_healthy", False),
+                margin=auto_pred.get("margin", 0.0),
+                chemical_treatment_withheld=auto_pred.get("chemical_treatment_withheld", False),
+                model_release_tier="VALIDATED MULTI-PART (Auto-Detected)",
+                is_experimental=False,
+                debug_info=auto_pred.get("debug_info", {}),
+            )
+
+        guidance = get_photo_guidance(viewpoint="whole_plant", crop=crop)
         reason = f"Viewpoint '{vp_res.raw_viewpoint}' diagnosis is not trained yet for crop '{crop}'."
         return ModularVisionResult(
             plant_detected=True,

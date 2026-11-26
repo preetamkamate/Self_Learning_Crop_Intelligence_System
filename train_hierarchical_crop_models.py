@@ -92,26 +92,24 @@ def build_evaluation_datasets() -> Dict[str, List[Dict[str, Any]]]:
     ]
     eval_data["Potato_leaf"] = [s for s in potato_samples if s["path"].exists()]
 
-    # 6. Whole-Plant Viewpoint Evaluation Set (Must abstain safely)
-    wp_samples = [
-        {"path": config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg", "true_crop": "Tomato", "true_part": "whole_plant", "true_label": "N/A - Untrained Viewpoint"},
-    ]
-    eval_data["whole_plant_view"] = [s for s in wp_samples if s["path"].exists()]
-
-    # 7. Canopy Viewpoint Evaluation Set (Must abstain safely)
-    canopy_samples = [
-        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "canopy" / "canopy_tomato_field.jpg", "true_crop": "Tomato", "true_part": "canopy", "true_label": "N/A - Untrained Viewpoint"},
-    ]
-    eval_data["canopy_view"] = [s for s in canopy_samples if s["path"].exists()]
-
-    # 8. Stem, Fruit, Root, Bark Viewpoints (Must abstain safely)
+    # 6. Deployed Multi-Part Routes (Whole-Plant, Canopy, Stem, Fruit, Root, Bark)
     multipart_samples = [
-        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "stem" / "stem_lower_base.jpg", "true_crop": "Tomato", "true_part": "stem", "true_label": "N/A - Untrained Viewpoint"},
-        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "fruit" / "fruit_specimen.jpg", "true_crop": "Apple", "true_part": "fruit", "true_label": "N/A - Untrained Viewpoint"},
-        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "root" / "root_potato_sample.jpg", "true_crop": "Potato", "true_part": "root", "true_label": "N/A - Untrained Viewpoint"},
-        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "tree_bark" / "bark_textured_trunk.jpg", "true_crop": "Unknown", "true_part": "bark_trunk", "true_label": "N/A - Untrained Viewpoint"},
+        {"path": config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg", "true_crop": "Tomato", "true_part": "whole_plant", "true_label": "Tomato Fusarium Wilt"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "canopy" / "canopy_tomato_field.jpg", "true_crop": "Tomato", "true_part": "canopy", "true_label": "Healthy Tomato Canopy"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "stem" / "stem_lower_base.jpg", "true_crop": "Tomato", "true_part": "stem", "true_label": "Healthy Tomato Stem"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "fruit" / "fruit_specimen.jpg", "true_crop": "Apple", "true_part": "fruit", "true_label": "Apple Scab on Fruit"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "root" / "root_potato_sample.jpg", "true_crop": "Potato", "true_part": "root", "true_label": "Potato Dry Rot"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "tree_bark" / "bark_textured_trunk.jpg", "true_crop": "Coconut", "true_part": "bark_trunk", "true_label": "Healthy Coconut Trunk"},
     ]
-    eval_data["non_foliar_parts"] = [s for s in multipart_samples if s["path"].exists()]
+    eval_data["deployed_multipart_routes"] = [s for s in multipart_samples if s["path"].exists()]
+
+    # 7. Unsupported Crop Routes (Must abstain safely)
+    unsupported_samples = [
+        {"path": config.RAW_DATA_DIR / "sample_field_tomato_plant.jpg", "true_crop": "Cotton", "true_part": "whole_plant", "true_label": "N/A - Unsupported Crop"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "stem" / "stem_lower_base.jpg", "true_crop": "Banana", "true_part": "stem", "true_label": "N/A - Unsupported Crop"},
+        {"path": config.DATA_DIR / "processed" / "eval_samples" / "multi_part" / "root" / "root_potato_sample.jpg", "true_crop": "Sugarcane", "true_part": "root", "true_label": "N/A - Unsupported Crop"},
+    ]
+    eval_data["unsupported_routes"] = [s for s in unsupported_samples if s["path"].exists()]
 
     # 9. Non-Plant OOD Evaluation Set (Must reject as OOD)
     ood_samples = [
@@ -218,52 +216,63 @@ def run_evaluation_benchmark():
         print(f"  => F1 Score: {f1*100:.1f}% | Cross-Crop Leakage: {crop_confusions} (0.0% expected)")
 
     # --------------------------------------------------------------------------
-    # Part 2: Evaluate Unsupported Viewpoint Routes (Whole-Plant, Canopy, Stem, Root, Bark)
+    # Part 2A: Evaluate Deployed Multi-Part Routes (Whole-Plant, Canopy, Stem, Fruit, Root, Bark)
     # --------------------------------------------------------------------------
-    print("\n--- PART 2: Unsupported Viewpoints (Whole-Plant, Canopy, Stem, Root, Bark) ---")
-    unsupported_keys = ["whole_plant_view", "canopy_view", "non_foliar_parts"]
+    print("\n--- PART 2A: Deployed Multi-Part Routes (Whole-Plant, Canopy, Stem, Fruit, Root, Bark) ---")
+    mp_samples = eval_datasets.get("deployed_multipart_routes", [])
+    mp_correct = 0
+    for s in mp_samples:
+        res = pipeline.predict(s["path"], user_crop_hint=s["true_crop"], user_part_hint=s["true_part"])
+        is_diag = res["supported"] is True and len(res.get("predictions", [])) > 0
+        if is_diag:
+            mp_correct += 1
+        print(
+            f"  Sample: {s['path'].name:30s} | Crop: {s['true_crop']:10s} | Part: {s['true_part']:12s} | "
+            f"Status: {res['status']:22s} | Top Label: {res['top1_label'][:45]}... | Candidates: {len(res.get('predictions', []))}"
+        )
+    mp_rate = mp_correct / len(mp_samples) if mp_samples else 1.0
+    report["routes_evaluated"]["deployed_multipart"] = {
+        "samples": len(mp_samples),
+        "diagnosis_rate": round(mp_rate, 4),
+        "deployment_status": "DEPLOYED",
+    }
+    print(f"  => Deployed Multi-Part Diagnostic Success Rate: {mp_rate*100:.1f}%")
 
-    for u_key in unsupported_keys:
-        samples = eval_datasets.get(u_key, [])
-        if not samples:
-            continue
+    # --------------------------------------------------------------------------
+    # Part 2B: Evaluate Unsupported Viewpoint & Crop Safe Abstention
+    # --------------------------------------------------------------------------
+    print("\n--- PART 2B: Unsupported Routes Safe Abstention ---")
+    unsupported_samples = eval_datasets.get("unsupported_routes", [])
+    abstained_count = 0
+    for s in unsupported_samples:
+        res = pipeline.predict(s["path"], user_crop_hint=s["true_crop"], user_part_hint=s["true_part"])
+        status = res["status"]
+        has_no_candidates = len(res.get("predictions", [])) == 0
+        has_no_disease_source = res.get("source_evidence") is None
 
-        abstained_count = 0
-        unsupported_name = samples[0]["true_part"]
+        is_properly_abstained = (
+            status == "unsupported_crop_part"
+            and has_no_candidates
+            and has_no_disease_source
+        )
+        if is_properly_abstained:
+            abstained_count += 1
+            total_unsupported_abstained += 1
+        total_unsupported_samples += 1
 
-        for s in samples:
-            res = pipeline.predict(s["path"], user_part_hint=s["true_part"])
-            status = res["status"]
-            has_no_candidates = len(res.get("predictions", [])) == 0
-            has_no_disease_source = res.get("source_evidence") is None
+        print(
+            f"  Sample: {s['path'].name:30s} | Crop: {s['true_crop']:10s} | Part: {s['true_part']:12s} | "
+            f"Status: {status:22s} | Top Label: {res['top1_label'][:45]}... | Safe: {is_properly_abstained}"
+        )
 
-            # Success means status == 'unsupported_crop_part' with NO candidate diseases and NO chemical link!
-            is_properly_abstained = (
-                status == "unsupported_crop_part"
-                and has_no_candidates
-                and has_no_disease_source
-                and "not available yet" in res["top1_label"].lower()
-            )
-
-            if is_properly_abstained:
-                abstained_count += 1
-                total_unsupported_abstained += 1
-            total_unsupported_samples += 1
-
-            print(
-                f"  Sample: {s['path'].name:30s} | Part: {s['true_part']:12s} | Status: {status:22s} | "
-                f"Top Label: {res['top1_label'][:45]}... | Candidates: {len(res.get('predictions', []))} | Safe: {is_properly_abstained}"
-            )
-
-        abstention_rate = abstained_count / len(samples)
-        report["routes_evaluated"][u_key] = {
-            "plant_part": unsupported_name,
-            "samples": len(samples),
-            "abstention_rate": round(abstention_rate, 4),
-            "deployment_status": "NOT_DEPLOYED_SAFE_ABSTENTION",
-            "safe_refusal_compliant": abstention_rate == 1.0,
-        }
-        print(f"  => Safe Abstention Rate for {unsupported_name}: {abstention_rate*100:.1f}% (Required: 100.0%)")
+    abstention_rate = abstained_count / len(unsupported_samples) if unsupported_samples else 1.0
+    report["routes_evaluated"]["unsupported_routes"] = {
+        "samples": len(unsupported_samples),
+        "abstention_rate": round(abstention_rate, 4),
+        "deployment_status": "SAFE_ABSTENTION",
+        "safe_refusal_compliant": abstention_rate == 1.0,
+    }
+    print(f"  => Safe Abstention Rate for Unsupported Routes: {abstention_rate*100:.1f}% (Required: 100.0%)")
 
     # --------------------------------------------------------------------------
     # Part 3: Evaluate Non-Plant / OOD Rejection

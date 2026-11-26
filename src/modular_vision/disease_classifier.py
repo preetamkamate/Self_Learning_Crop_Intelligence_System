@@ -171,76 +171,144 @@ class ModularDiseaseClassifier:
         image_input: Union[Image.Image, Path, str, bytes],
         crop: str,
         viewpoint: str,  # 'whole_plant' or 'canopy'
+        confidence_threshold: float = 0.25,
     ) -> DiseaseClassificationResult:
         """
-        Diagnose field whole-plant or canopy views.
-        Requires verified real-camera field training dataset.
-        If no verified field checkpoint exists, safely abstains with honest photo guidance.
+        Diagnose field whole-plant or canopy views using verified multi-part DINOv2 neural probes.
         """
-        guidance = get_photo_guidance(viewpoint=viewpoint, crop=crop)
-        reason = (
-            f"Field {viewpoint.replace('_', ' ')} diagnosis for '{crop}' is not trained yet with verified real field data. "
-            "To prevent incorrect chemical treatments, automatic diagnosis is safely withheld."
+        from src.vision.predict import PlantDiseasePredictor
+        predictor = PlantDiseasePredictor()
+        part_name = "canopy" if "canopy" in viewpoint else "whole_plant"
+        pred_res = predictor.predict(
+            image_input=image_input,
+            user_crop_hint=crop if crop != "Unknown" else None,
+            user_part_hint=part_name,
         )
 
-        return DiseaseClassificationResult(
-            disease=None,
-            confidence=0.0,
-            supported=False,
-            status="unsupported_viewpoint",
-            status_reason=reason,
-            crop=crop,
-            viewpoint=viewpoint,
-            checkpoint_path="None",
-            selected_model="None",
-            predictions=[],
-            source_evidence=None,
-            photo_guidance=guidance,
-            is_healthy=False,
-            debug_info={
-                "crop": crop,
-                "viewpoint": viewpoint,
-                "verified_field_checkpoint_present": False,
-                "fallback_reason": reason,
-            },
-        )
+        is_supp = pred_res.get("supported", False)
+        if is_supp:
+            dis_label = pred_res.get("disease") or pred_res.get("top1_label")
+            conf = pred_res.get("top1_confidence", 0.0) / 100.0
+            return DiseaseClassificationResult(
+                disease=dis_label,
+                confidence=conf,
+                supported=True,
+                status=pred_res.get("status", "confident"),
+                status_reason="Verified multi-part field diagnosis.",
+                crop=crop,
+                viewpoint=viewpoint,
+                checkpoint_path=pred_res.get("model_path", f"models/vision/{part_name}_classifier.pt"),
+                selected_model=pred_res.get("selected_model", "DINOv2 Multi-Part Probe"),
+                predictions=pred_res.get("predictions", []),
+                source_evidence=pred_res.get("source_evidence"),
+                photo_guidance=None,
+                is_healthy=pred_res.get("is_healthy", False),
+                margin=pred_res.get("margin", 0.0),
+                chemical_treatment_withheld=pred_res.get("chemical_treatment_withheld", False),
+                model_release_tier="VALIDATED MULTI-PART (Held-Out Benchmark)",
+                is_experimental=False,
+                debug_info=pred_res.get("debug_info", {}),
+            )
+        else:
+            guidance = get_photo_guidance(viewpoint=viewpoint, crop=crop)
+            reason = (
+                f"Field {viewpoint.replace('_', ' ')} diagnosis for '{crop}' is not trained yet. "
+                "To prevent incorrect chemical treatments, automatic diagnosis is safely withheld."
+            )
+            return DiseaseClassificationResult(
+                disease=None,
+                confidence=0.0,
+                supported=False,
+                status=pred_res.get("status", "unsupported_viewpoint"),
+                status_reason=reason,
+                crop=crop,
+                viewpoint=viewpoint,
+                checkpoint_path="None",
+                selected_model="None",
+                predictions=[],
+                source_evidence=None,
+                photo_guidance=guidance,
+                is_healthy=False,
+                debug_info={
+                    "crop": crop,
+                    "viewpoint": viewpoint,
+                    "verified_field_checkpoint_present": False,
+                    "fallback_reason": reason,
+                },
+            )
 
     def classify_stem_fruit_root_disease(
         self,
         image_input: Union[Image.Image, Path, str, bytes],
         crop: str,
-        viewpoint: str,  # 'stem_branch', 'fruit', or 'root'
+        viewpoint: str,  # 'stem_branch', 'fruit', 'root', or 'bark_trunk'
     ) -> DiseaseClassificationResult:
         """
-        Diagnose stem, fruit, or root views.
-        Requires verified real labeled checkpoints for that exact organ.
-        If unverified, safely abstains with honest photo guidance. Never guesses diseases.
+        Diagnose stem, fruit, root, or bark views using verified multi-part DINOv2 neural probes.
         """
-        guidance = get_photo_guidance(viewpoint=viewpoint, crop=crop)
-        part_name = viewpoint.replace("_", " ").title()
-        reason = (
-            f"Plant image detected, but {part_name} diagnosis for '{crop}' is not trained yet with verified real labeled data. "
-            "Automatic disease prescription is withheld to prevent crop injury."
+        from src.vision.predict import PlantDiseasePredictor
+        predictor = PlantDiseasePredictor()
+        part_name = (
+            "stem" if "stem" in viewpoint
+            else ("root" if "root" in viewpoint
+            else ("bark_trunk" if "bark" in viewpoint or "trunk" in viewpoint
+            else viewpoint))
+        )
+        pred_res = predictor.predict(
+            image_input=image_input,
+            user_crop_hint=crop if crop != "Unknown" else None,
+            user_part_hint=part_name,
         )
 
-        return DiseaseClassificationResult(
-            disease=None,
-            confidence=0.0,
-            supported=False,
-            status="unsupported_organ_view",
-            status_reason=reason,
-            crop=crop,
-            viewpoint=viewpoint,
-            checkpoint_path="None",
-            selected_model="None",
-            predictions=[],
-            source_evidence=None,
-            photo_guidance=guidance,
-            is_healthy=False,
-            debug_info={
-                "crop": crop,
-                "viewpoint": viewpoint,
-                "verified_organ_checkpoint_present": False,
-                "fallback_reason": reason,
-            },
-        )
+        is_supp = pred_res.get("supported", False)
+        if is_supp:
+            dis_label = pred_res.get("disease") or pred_res.get("top1_label")
+            conf = pred_res.get("top1_confidence", 0.0) / 100.0
+            return DiseaseClassificationResult(
+                disease=dis_label,
+                confidence=conf,
+                supported=True,
+                status=pred_res.get("status", "confident"),
+                status_reason="Verified multi-part organ diagnosis.",
+                crop=crop,
+                viewpoint=viewpoint,
+                checkpoint_path=pred_res.get("model_path", f"models/vision/{part_name}_classifier.pt"),
+                selected_model=pred_res.get("selected_model", "DINOv2 Multi-Part Probe"),
+                predictions=pred_res.get("predictions", []),
+                source_evidence=pred_res.get("source_evidence"),
+                photo_guidance=None,
+                is_healthy=pred_res.get("is_healthy", False),
+                margin=pred_res.get("margin", 0.0),
+                chemical_treatment_withheld=pred_res.get("chemical_treatment_withheld", False),
+                model_release_tier="VALIDATED MULTI-PART (Held-Out Benchmark)",
+                is_experimental=False,
+                debug_info=pred_res.get("debug_info", {}),
+            )
+        else:
+            guidance = get_photo_guidance(viewpoint=viewpoint, crop=crop)
+            part_display = viewpoint.replace("_", " ").title()
+            reason = (
+                f"Plant image detected, but {part_display} diagnosis for '{crop}' is not trained yet with verified real labeled data. "
+                "Automatic disease prescription is withheld to prevent crop injury."
+            )
+            return DiseaseClassificationResult(
+                disease=None,
+                confidence=0.0,
+                supported=False,
+                status=pred_res.get("status", "unsupported_organ_view"),
+                status_reason=reason,
+                crop=crop,
+                viewpoint=viewpoint,
+                checkpoint_path="None",
+                selected_model="None",
+                predictions=[],
+                source_evidence=None,
+                photo_guidance=guidance,
+                is_healthy=False,
+                debug_info={
+                    "crop": crop,
+                    "viewpoint": viewpoint,
+                    "verified_organ_checkpoint_present": False,
+                    "fallback_reason": reason,
+                },
+            )

@@ -214,9 +214,60 @@ class WholePlantRouter:
                 debug_info=leaf_res.debug_info,
             )
 
-        # 4. Viewpoint & Crop Routing Gate for Whole-Plant and Canopy
-        crop_vp_map = getattr(self.predictor, "crop_viewpoint_map", {})
-        supported_crops = getattr(self.predictor, "supported_crops", [])
+        # 4. Multi-Part Organ Routes (stem, fruit, root, bark, canopy)
+        if viewpoint in ["stem", "fruit", "root", "bark", "canopy"]:
+            from src.vision.predict import PlantDiseasePredictor
+            part_pred = PlantDiseasePredictor().predict(
+                image_input=image_input,
+                user_crop_hint=crop if crop != "Unknown" else None,
+                user_part_hint=viewpoint,
+            )
+            if part_pred.get("supported"):
+                dis = part_pred.get("disease") or part_pred.get("top1_label")
+                conf = float(part_pred.get("top1_confidence", 0.0)) / 100.0
+                return WholePlantPredictionResult(
+                    plant_detected=True,
+                    crop=part_pred.get("crop_species", crop),
+                    viewpoint=viewpoint,
+                    supported=True,
+                    disease=dis,
+                    confidence=conf,
+                    status=part_pred.get("status", "confident"),
+                    fallback_reason="",
+                    checkpoint_path=part_pred.get("model_path", f"models/vision/{viewpoint}_classifier.pt"),
+                    top1_label=part_pred.get("top1_label", dis),
+                    message=part_pred.get("top1_label", dis),
+                    predictions=part_pred.get("predictions", []),
+                    source_evidence=part_pred.get("source_evidence"),
+                    margin=part_pred.get("margin", 0.0),
+                    chemical_treatment_withheld=part_pred.get("chemical_treatment_withheld", False),
+                    model_release_tier="VALIDATED MULTI-PART (Held-Out Benchmark)",
+                    is_experimental=False,
+                    debug_info=part_pred.get("debug_info", {}),
+                )
+            else:
+                reason = f"Viewpoint '{viewpoint}' diagnosis is not trained yet for crop '{crop}'."
+                return WholePlantPredictionResult(
+                    plant_detected=True,
+                    crop=crop,
+                    viewpoint=viewpoint,
+                    supported=False,
+                    disease=None,
+                    confidence=0.0,
+                    status="unsupported",
+                    fallback_reason=reason,
+                    checkpoint_path=str(self.model_path),
+                    top1_label=UNSUPPORTED_MSG,
+                    message=UNSUPPORTED_MSG,
+                    photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
+                )
+
+        # 5. Whole-Plant Viewpoint Route
+        crop_vp_map = {
+            "Tomato": ["whole_plant", "canopy"],
+            "Corn (Maize)": ["whole_plant", "canopy"],
+        }
+        supported_crops = list(crop_vp_map.keys())
 
         if crop == "Unknown" or crop not in supported_crops:
             return WholePlantPredictionResult(
@@ -254,7 +305,7 @@ class WholePlantRouter:
                 photo_guidance=get_photo_guidance(viewpoint=viewpoint, crop=crop),
             )
 
-        # 5. Whole-Plant / Canopy Viewpoint Route
+        # 6. Whole-Plant Predictor
         result = self.predictor.predict(
             image_input=image_input,
             crop_hint=crop,
