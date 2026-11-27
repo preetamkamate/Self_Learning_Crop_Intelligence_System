@@ -183,6 +183,16 @@ class AutonomousRouter:
                     detected_crop_hint = "Apple"
                 elif "cassava" in text_lower:
                     detected_crop_hint = "Cassava"
+                elif "potato" in text_lower:
+                    detected_crop_hint = "Potato"
+                elif "grape" in text_lower:
+                    detected_crop_hint = "Grape"
+                elif "citrus" in text_lower or "orange" in text_lower or "lemon" in text_lower:
+                    detected_crop_hint = "Citrus"
+                elif "bell pepper" in text_lower or "capsicum" in text_lower:
+                    detected_crop_hint = "Bell Pepper"
+                elif "coconut" in text_lower:
+                    detected_crop_hint = "Coconut"
 
             detected_part_hint = kwargs.get("part_hint", None)
             if not detected_part_hint or detected_part_hint in ["Unknown", "Auto-detect", None]:
@@ -190,10 +200,12 @@ class AutonomousRouter:
                     detected_part_hint = "leaf"
                 elif "stem" in text_lower or "branch" in text_lower or "stalk" in text_lower:
                     detected_part_hint = "stem"
-                elif "fruit" in text_lower or "pod" in text_lower or "berry" in text_lower or "grain" in text_lower:
+                elif "fruit" in text_lower or "pod" in text_lower or "berry" in text_lower or "grain" in text_lower or "ear" in text_lower:
                     detected_part_hint = "fruit"
                 elif "root" in text_lower or "tuber" in text_lower:
                     detected_part_hint = "root"
+                elif "bark" in text_lower or "trunk" in text_lower:
+                    detected_part_hint = "bark"
                 elif "canopy" in text_lower:
                     detected_part_hint = "canopy"
                 elif "whole" in text_lower or "plant" in text_lower or "field" in text_lower:

@@ -134,6 +134,53 @@ class PestDetector:
                 return True
         return False
 
+    def is_sole_pest_query(self, user_text: Optional[str] = None, symptom_desc: Optional[str] = None) -> bool:
+        """
+        Check whether the user is explicitly and solely asking about insect pests.
+        Returns False for general diagnostic questions (e.g. 'Analyze this crop image for diseases or pests',
+        'is my plant diseased or infested?', etc.) so that trained disease/multi-part classifiers
+        are prioritized first.
+        """
+        combined = f"{user_text or ''} {symptom_desc or ''}".lower().strip()
+        if not combined:
+            return False
+
+        # Exclude general diagnostic prompts or prompts asking about both diseases & pests
+        general_diagnostic_phrases = [
+            "diseases or pests",
+            "diseases and pests",
+            "disease or pest",
+            "disease and pest",
+            "analyze this crop",
+            "analyze this plant",
+            "analyze this image",
+            "examine this plant",
+            "examine this leaf",
+            "examine this crop",
+            "health issues or diseases",
+            "health issues",
+            "please analyze",
+            "please inspect",
+            "check this sample",
+            "what is wrong",
+            "diagnose",
+            "ರೋಗ ಅಥವಾ ಕೀಟ",
+        ]
+        if any(gp in combined for gp in general_diagnostic_phrases):
+            return False
+
+        # If user explicitly asks about diseases, blights, rots, fungi, prioritize disease
+        disease_words = [
+            "disease", "blight", "rot", "scab", "rust", "mildew", "spot",
+            "canker", "wilt", "mold", "fungus", "fungal", "bacterial", "viral",
+            "ರೋಗ", "ಅಂಗಮಾರಿ"
+        ]
+        if any(dw in combined for dw in disease_words):
+            return False
+
+        # Must have an explicit pest keyword
+        return self.is_pest_query(user_text, symptom_desc)
+
     def detect_pest(
         self,
         image_input: Optional[Union[Image.Image, str, Any]] = None,

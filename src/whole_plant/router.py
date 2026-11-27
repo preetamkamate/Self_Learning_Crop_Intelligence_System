@@ -137,9 +137,15 @@ class WholePlantRouter:
             )
 
         # 1B. Pest Query Screening & IPM Routing
+        # ONLY route to pest_detector if user explicitly asks solely about insects/pests AND a trained checkpoint exists.
+        # Never let an untrained pest route block a valid disease prediction across any supported crop or plant part.
         from src.modular_vision.pest_detector import PestDetector
         pest_detector = PestDetector()
-        if pest_detector.is_pest_query(user_text, symptom_desc):
+        is_sole_pest = (
+            hasattr(pest_detector, "is_sole_pest_query")
+            and pest_detector.is_sole_pest_query(user_text, symptom_desc)
+        )
+        if is_sole_pest and pest_detector.is_trained:
             pest_res = pest_detector.detect_pest(
                 image_input=image_input,
                 crop=crop,
@@ -147,22 +153,23 @@ class WholePlantRouter:
                 user_text=user_text,
                 symptom_desc=symptom_desc,
             )
-            return WholePlantPredictionResult(
-                plant_detected=True,
-                crop=crop,
-                viewpoint=viewpoint,
-                supported=pest_res.supported,
-                disease=pest_res.pest_label,
-                confidence=pest_res.confidence,
-                status=pest_res.status,
-                fallback_reason=pest_res.status_reason,
-                checkpoint_path=str(pest_detector.model_path) if pest_res.supported else "None",
-                top1_label=pest_res.pest_label or pest_res.status_reason,
-                message=pest_res.status_reason,
-                photo_guidance=pest_res.photo_guidance,
-                chemical_treatment_withheld=pest_res.metadata.get("chemical_pesticides_withheld", True),
-                debug_info={"pest_info": pest_res.to_dict(), "ipm_advice": pest_res.ipm_scouting_advice},
-            )
+            if pest_res.supported:
+                return WholePlantPredictionResult(
+                    plant_detected=True,
+                    crop=crop,
+                    viewpoint=viewpoint,
+                    supported=True,
+                    disease=pest_res.pest_label,
+                    confidence=pest_res.confidence,
+                    status=pest_res.status,
+                    fallback_reason="",
+                    checkpoint_path=str(pest_detector.model_path),
+                    top1_label=pest_res.pest_label,
+                    message=pest_res.pest_label,
+                    photo_guidance=pest_res.photo_guidance,
+                    chemical_treatment_withheld=pest_res.metadata.get("chemical_pesticides_withheld", True),
+                    debug_info={"pest_info": pest_res.to_dict(), "ipm_advice": pest_res.ipm_scouting_advice},
+                )
 
         # 2. Checkpoint & Deployment Gate
         # If model checkpoint or evaluation report does not exist, return safe abstention

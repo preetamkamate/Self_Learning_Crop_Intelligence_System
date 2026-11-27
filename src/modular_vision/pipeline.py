@@ -161,8 +161,13 @@ class ModularCropVisionPipeline:
         canonical_vp = vp_res.canonical_viewpoint
 
         # Step 3: Pest Detection Screening
-        is_pest_query = self.pest_detector.is_pest_query(user_text, symptom_desc)
-        if is_pest_query:
+        # ONLY route to pest_detector if user explicitly asks solely about insects/pests AND a trained checkpoint exists.
+        # Never let an untrained pest route block a valid disease prediction across any supported crop or plant part.
+        is_sole_pest = (
+            hasattr(self.pest_detector, "is_sole_pest_query")
+            and self.pest_detector.is_sole_pest_query(user_text, symptom_desc)
+        )
+        if is_sole_pest and self.pest_detector.is_trained:
             pest_res = self.pest_detector.detect_pest(
                 image_input=image_input,
                 crop=crop,
@@ -170,22 +175,23 @@ class ModularCropVisionPipeline:
                 user_text=user_text,
                 symptom_desc=symptom_desc,
             )
-            return ModularVisionResult(
-                plant_detected=True,
-                crop=crop,
-                viewpoint=canonical_vp,
-                supported=pest_res.supported,
-                disease=pest_res.pest_label,
-                confidence=pest_res.confidence,
-                status=pest_res.status,
-                fallback_reason=pest_res.status_reason,
-                top1_label="Pest scouting photo guidance provided",
-                checkpoint_path="None",
-                selected_model="PestScoutingEngine",
-                pest_info=pest_res.to_dict(),
-                photo_guidance=pest_res.photo_guidance,
-                debug_info={"pest_suspected": True, "ipm_advice": pest_res.ipm_scouting_advice},
-            )
+            if pest_res.supported:
+                return ModularVisionResult(
+                    plant_detected=True,
+                    crop=crop,
+                    viewpoint=canonical_vp,
+                    supported=True,
+                    disease=pest_res.pest_label,
+                    confidence=pest_res.confidence,
+                    status=pest_res.status,
+                    fallback_reason="",
+                    top1_label=pest_res.pest_label or "Pest Detected",
+                    checkpoint_path=str(self.pest_detector.model_path),
+                    selected_model="PestScoutingEngine",
+                    pest_info=pest_res.to_dict(),
+                    photo_guidance=pest_res.photo_guidance,
+                    debug_info={"pest_suspected": True, "ipm_advice": pest_res.ipm_scouting_advice},
+                )
 
         # Step 4: Route-Specific Disease Diagnosis
         # Only diagnose if exact verified route is deployed; otherwise provide honest guidance
