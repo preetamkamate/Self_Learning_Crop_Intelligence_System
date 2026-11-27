@@ -443,94 +443,110 @@ with st.sidebar:
 # MAIN PAGE: Minimalist ChatGPT-Style Chat Interface
 # ==============================================================================
 
-# Header & Branding
-st.markdown(
-    """
-    <div class="project-header">
-        <div>
+# Header & Branding with Top-Right Soil & NPK Parameters Menu (⋮)
+head_col1, head_col2 = st.columns([0.76, 0.24])
+with head_col1:
+    st.markdown(
+        """
+        <div style="padding: 4px 0 10px 0;">
             <h2 style="margin: 0; padding: 0; font-weight: 700; color: #1e293b;">🌾 Crop Intelligence System</h2>
             <p style="margin: 2px 0 0 0; color: #64748b; font-size: 0.95rem;">
-                <b>5th-Semester B.E. Project</b> &bull; Lead AI/ML Engineer: <b>Preetam Kamate</b>
+                Autonomous Agronomic & Plant Pathology Assistant &bull; DINOv2 Vision (8 Viewpoints)
             </p>
         </div>
-        <div style="text-align: right;">
-            <span class="author-pill">
-                ● DINOv2 Vision &bull; 8 Viewpoints Active
-            </span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True,
+    )
+
+with head_col2:
+    with st.popover("⋮ Soil & NPK Parameters", use_container_width=True):
+        st.markdown("#### 🌱 Soil & NPK Configuration")
+        curr_profile = st.session_state.farmer_state.profile
+        new_n = st.slider("Nitrogen (N) kg/ha", 0, 200, int(curr_profile.soil_n or 90), key="hdr_soil_n")
+        new_p = st.slider("Phosphorus (P) kg/ha", 0, 150, int(curr_profile.soil_p or 42), key="hdr_soil_p")
+        new_k = st.slider("Potassium (K) kg/ha", 0, 200, int(curr_profile.soil_k or 43), key="hdr_soil_k")
+        new_ph = st.slider("Soil pH", 4.0, 9.5, float(getattr(curr_profile, "soil_ph", 6.5)), step=0.1, key="hdr_soil_ph")
+        new_land = st.number_input("Land Holding (Acres)", 0.5, 50.0, float(getattr(curr_profile, "land_area_acres", 2.5)), step=0.5, key="hdr_land_acres")
+        crop_opts = ["Tomato", "Corn (Maize)", "Apple", "Potato", "Grape", "Citrus", "Bell Pepper", "Cassava", "Coconut", "Cotton", "Sugarcane"]
+        sel_crop_idx = crop_opts.index(curr_profile.active_crop) if curr_profile.active_crop in crop_opts else 0
+        new_crop = st.selectbox("Active Crop", crop_opts, index=sel_crop_idx, key="hdr_active_crop")
+
+        if st.button("💾 Update Soil Profile", type="primary", use_container_width=True):
+            curr_profile.soil_n = float(new_n)
+            curr_profile.soil_p = float(new_p)
+            curr_profile.soil_k = float(new_k)
+            curr_profile.soil_ph = float(new_ph)
+            curr_profile.land_area_acres = float(new_land)
+            curr_profile.active_crop = new_crop
+            st.success("Soil parameters updated!")
 
 # Render Chat Message Stream
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         if msg.get("image_bytes"):
             st.image(msg["image_bytes"], caption="Uploaded Photograph", width=280)
-        c_text = msg["content_kn"] if active_lang == "kn" else msg["content_en"]
-        st.markdown(c_text)
+        c_text = msg.get("content_kn") if active_lang == "kn" else msg.get("content_en")
+        st.markdown(c_text or "")
 
 
 # ==============================================================================
-# BOTTOM BAR: Attachment Bar + Single Chat Input
+# BOTTOM BAR: Inline Photo Attachment + Chat Input Bar
 # ==============================================================================
 
-# Attachment Expander for Uploading Photos (1–3 images)
-with st.expander("➕ Attach Crop Photo(s) [Click + to upload 1–3 photos]", expanded=False):
-    up_c1, up_c2 = st.columns([1.8, 1.2])
-    with up_c1:
-        uploaded_files = st.file_uploader(
-            "Upload 1–3 crop photos (whole plant, canopy, leaf, stem, fruit, root, bark):",
+st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+input_c1, input_c2 = st.columns([0.16, 0.84])
+
+with input_c1:
+    with st.popover("📎 Photo", use_container_width=True):
+        st.markdown("**Attach Plant Photo**")
+        uploaded_file = st.file_uploader(
+            "Upload Photo",
             type=["jpg", "jpeg", "png", "webp"],
-            accept_multiple_files=True,
-            key="chat_plant_photo_uploader",
+            key="bottom_chat_photo_uploader",
+            label_visibility="collapsed",
         )
-    with up_c2:
         sel_crop = st.selectbox(
-            "Crop Species (Optional):",
+            "Crop (Optional):",
             ["Auto-detect", "Tomato", "Corn (Maize)", "Apple", "Cassava", "Potato", "Grape", "Citrus", "Bell Pepper", "Coconut", "Other"],
             index=0,
-            key="chat_sel_crop",
+            key="bottom_chat_crop",
         )
         sel_viewpoint = st.selectbox(
-            "Plant Part / Viewpoint:",
+            "Plant Part (Optional):",
             [
-                "Auto-detect (Autonomous Multi-Part)",
-                "Whole Plant (Active Primary Diagnosis)",
-                "Canopy / Field View (Active)",
-                "Leaf (Active - Foliar Pathology)",
-                "Stem / Branch (Active)",
-                "Fruit / Pod / Ear (Active)",
-                "Root / Tuber (Active)",
-                "Bark / Trunk (Active)",
+                "Auto-detect",
+                "Whole Plant",
+                "Canopy / Field View",
+                "Leaf",
+                "Stem / Branch",
+                "Fruit / Pod / Ear",
+                "Root / Tuber",
+                "Bark / Trunk",
             ],
             index=0,
-            key="chat_sel_vp",
+            key="bottom_chat_vp",
         )
-        analyze_btn = st.button("🔍 Diagnose Attached Photo(s)", type="primary", use_container_width=True)
+        if uploaded_file:
+            st.caption(f"✓ Ready: {uploaded_file.name}")
 
-# Main Chat Input Area
-chat_input = st.chat_input("Ask a question about crops, weather, diseases, or attach a photo with ➕ above...")
+with input_c2:
+    chat_input = st.chat_input("Ask a question (e.g. 'Tomato yellow leaf, what do I do?') or attach a photo via 📎...")
+
 active_query = quick_query or chat_input
 
-# Collect active images if uploaded or sample selected
-active_images = []
-if uploaded_files:
-    files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
-    for uf in files[:3]:
-        b = uf.getvalue() if hasattr(uf, "getvalue") else uf.read()
-        active_images.append(b)
+# Check if an image is provided (via upload or sample photo)
+active_image_bytes = None
+if uploaded_file is not None:
+    active_image_bytes = uploaded_file.getvalue() if hasattr(uploaded_file, "getvalue") else uploaded_file.read()
 elif sample_image_bytes:
-    active_images.append(sample_image_bytes)
+    active_image_bytes = sample_image_bytes
 
-# Execution: Photo Diagnosis
-if (analyze_btn and active_images) or (sample_image_bytes and not active_query):
-    query_text = sample_image_label or (chat_input or "Analyze this crop image for diseases or pests.")
-    img_hashes = [compute_image_hash(b) for b in active_images]
-    combined_hash = "_".join(img_hashes)
+# Execution: Either image diagnosis or text query
+if active_image_bytes and (active_query or sample_image_bytes):
+    query_text = active_query or sample_image_label or "Analyze this crop image for diseases or pests."
+    img_h = compute_image_hash(active_image_bytes)
 
-    with st.spinner("Analyzing plant photograph(s) through multi-part vision engine..."):
+    with st.spinner("Analyzing plant photograph with DINOv2 vision & multimodal advisor..."):
         crop_hint_clean = sel_crop.split(" (")[0] if sel_crop != "Auto-detect" else None
         if "Whole Plant" in sel_viewpoint:
             viewpoint_hint_clean = "whole_plant"
@@ -549,59 +565,42 @@ if (analyze_btn and active_images) or (sample_image_bytes and not active_query):
         else:
             viewpoint_hint_clean = None
 
-        all_telemetries = []
-        for idx, img_b in enumerate(active_images):
-            raw_pil = Image.open(io.BytesIO(img_b))
-            pil_image = ImageOps.exif_transpose(raw_pil).convert("RGB")
-            h = img_hashes[idx]
+        raw_pil = Image.open(io.BytesIO(active_image_bytes))
+        pil_image = ImageOps.exif_transpose(raw_pil).convert("RGB")
 
-            t = router.route_and_execute(
-                user_text=query_text,
-                image_input=pil_image,
-                is_new_image=True,
-                image_hash=h,
-                crop_hint=crop_hint_clean,
-                part_hint=viewpoint_hint_clean,
-                confidence_threshold=DEFAULT_CONF_THRESHOLD,
-                state=st.session_state.farmer_state,
-            )
-            all_telemetries.append(t)
+        telemetry = router.route_and_execute(
+            user_text=query_text,
+            image_input=pil_image,
+            is_new_image=True,
+            image_hash=img_h,
+            crop_hint=crop_hint_clean,
+            part_hint=viewpoint_hint_clean,
+            confidence_threshold=DEFAULT_CONF_THRESHOLD,
+            state=st.session_state.farmer_state,
+        )
 
-        primary_telemetry = None
-        for t in all_telemetries:
-            v = t.get("vision_result", {})
-            if v.get("supported") and v.get("status") in ["confident", "probable_diagnosis_needs_confirmation"]:
-                primary_telemetry = t
-                break
-        if not primary_telemetry:
-            primary_telemetry = all_telemetries[0]
+        st.session_state.last_diagnostic_result = telemetry
 
-        primary_telemetry["multi_image_telemetries"] = all_telemetries
+        # Generate Structured 5-Point Advisory
+        adv = synthesis_service.generate_advisory(telemetry, language=active_lang)
 
-        # Generate 5-Point Structured Bot Response
-        res_5pt_en = format_5_point_response(primary_telemetry, lang="en")
-        res_5pt_kn = format_5_point_response(primary_telemetry, lang="kn")
-
-        st.session_state.last_diagnostic_result = primary_telemetry
-
-        # Append to Chat Stream
+        # Append User & Assistant Turns to Chat History
         st.session_state.messages.append({
             "role": "user",
             "content_en": query_text,
             "content_kn": query_text,
-            "image_bytes": active_images[0],
+            "image_bytes": active_image_bytes,
             "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
         })
         st.session_state.messages.append({
             "role": "assistant",
-            "content_en": res_5pt_en,
-            "content_kn": res_5pt_kn,
-            "telemetry": primary_telemetry,
+            "content_en": adv.get("en", ""),
+            "content_kn": adv.get("kn", ""),
+            "telemetry": telemetry,
             "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
         })
         st.rerun()
 
-# Execution: Text Query or Quick Prompt
 elif active_query:
     st.session_state.messages.append({
         "role": "user",
@@ -619,8 +618,8 @@ elif active_query:
         adv = synthesis_service.generate_advisory(telemetry, language=active_lang)
         st.session_state.messages.append({
             "role": "assistant",
-            "content_en": adv["en"],
-            "content_kn": adv["kn"],
+            "content_en": adv.get("en", ""),
+            "content_kn": adv.get("kn", ""),
             "telemetry": telemetry,
             "turn_id": f"turn_{uuid.uuid4().hex[:8]}",
         })

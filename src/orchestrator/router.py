@@ -60,7 +60,7 @@ class AutonomousRouter:
         self,
         user_text: str,
         image_input: Optional[Union[Image.Image, bytes, str, Path]] = None,
-        is_new_image: bool = False,  # CHANGED: Default is_new_image to False as specified
+        is_new_image: Optional[bool] = None,
         image_hash: Optional[str] = None,
         state: Optional[SessionState] = None,
         **kwargs,  # CHANGED: Safely absorb any extra keyword arguments
@@ -137,6 +137,14 @@ class AutonomousRouter:
             r"wilt",
             r"pest",
             r"curling",
+            r"curl",
+            r"yellow",
+            r"yellowing",
+            r"chlorosis",
+            r"leaf",
+            r"leaves",
+            r"foliar",
+            r"foliage",
             r"caterpillar",
             r"worm",
             r"cure",
@@ -151,6 +159,22 @@ class AutonomousRouter:
             r"dosage",
             r"how\s+to\s+(cure|control|manage|treat)",
             r"what\s+(medicine|spray|chemical)\s+should",
+            r"what\s+do\s+i\s+do",
+            r"what\s+should\s+i\s+do",
+            r"help",
+            r"problem",
+            r"issue",
+            r"dying",
+            r"damage",
+            r"infection",
+            r"fungus",
+            r"fungal",
+            r"bacterial",
+            r"viral",
+            r"virus",
+            r"mildew",
+            r"canker",
+            r"scab",
             r"contagious",
             r"ರೋಗ",
             r"ಕೀಟ",
@@ -158,10 +182,15 @@ class AutonomousRouter:
             r"ಔಷಧಿ",
             r"ಚಿಕಿತ್ಸೆ",
             r"ಸಿಂಪಡಿಸಬೇಕು",
+            r"ಹಳದಿ",
+            r"ಎಲೆ",
         ]
         wants_disease = any(re.search(pat, text_lower) for pat in disease_patterns)
 
-        has_new_image = (image_input is not None) and (is_new_image is True)  # CHANGED: Vision only triggers when image is provided and is_new_image is True
+        if is_new_image is None:
+            has_new_image = image_input is not None
+        else:
+            has_new_image = (image_input is not None) and (is_new_image is True)
 
         # ----------------------------------------------------------------------
         # Module Execution
@@ -228,6 +257,8 @@ class AutonomousRouter:
             primary_intent = "weather_query"
         elif wants_crop_rec:
             primary_intent = "crop_recommendation"
+        elif wants_disease:
+            primary_intent = "disease_diagnosis"
         else:
             primary_intent = "general_query"
 
@@ -327,4 +358,5 @@ class AutonomousRouter:
             "rag_results": rag_results,
             "farmer_profile": state.profile,
             "recent_history": state.get_recent_history(max_turns=6),
+            "image_input": image_input,
         }
