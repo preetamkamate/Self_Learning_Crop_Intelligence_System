@@ -1,362 +1,247 @@
 """
-Autonomous Internal Router for Crop Intelligence System.
-Selectively triggers specialized components (Vision, Tabular ML, Weather, RAG)
-strictly based on user intent and image novelty.
+Direct Gemini API Orchestrator Router for Crop Intelligence System.
+
+Routes text and multimodal image queries directly through Google GenAI (`gemini-2.5-flash`)
+grounded with ICAR/IIHR knowledge retrieval and soil NPK/pH telemetry — with zero local
+`.pt`/`.pth` model weight dependencies.
 """
-import logging
+from __future__ import annotations
+
+import os
 import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 from PIL import Image
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+from src.modular_vision.pipeline import (
+    DEFAULT_MODEL,
+    FivePointResponseFormatter,
+    ModularVisionPipeline,
+)
+from src.rag.kb_retriever import SUPPORTED_DATASETS, KnowledgeBaseRetriever
 
-import config
-from src.orchestrator.state import SessionState
-from src.orchestrator.weather import WeatherService
-from src.rag.retriever import get_retriever
-from src.tabular.predict import CropPredictor
-from src.whole_plant.router import WholePlantRouter
+DIAGNOSIS_KEYWORDS_RE = re.compile(
+    r"\b("
+    r"diagnos\w*|disease\w*|spot\w*|blight|rust|rot|wilt|mosaic|mildew|scab|"
+    r"curl|yellowing|chlorosis|lesion\w*|pustule\w*|pest\w*|thrips|mite\w*|"
+    r"armyworm|aphid\w*|whitefly|fungus|bacterial|virus|symptom\w*|infected|"
+    r"damage|cure|treat\w*|spray"
+    r")\b",
+    flags=re.IGNORECASE,
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+class CropRouter:
+    """Autonomous router dispatching queries directly to Gemini 2.5 Flash + ICAR/IIHR KB."""
 
-class AutonomousRouter:
-    """Intelligent dispatcher that activates appropriate system modules selectively."""
-
-    def __init__(self):
-        logging.info("Initializing AutonomousRouter modules...")
-        self.tabular_predictor = CropPredictor()
-        self.whole_plant_router = WholePlantRouter()
-        self.whole_plant_predictor = self.whole_plant_router.predictor
-        self.retriever = get_retriever()
-        self.weather_service = WeatherService()
-
-    def _extract_soil_overrides(self, text: str, state: SessionState):
-        """Extract explicit NPK or pH values from user text to update profile."""
-        n_match = re.search(r"\bN\s*[:=]?\s*(\d+(?:\.\d+)?)\b", text, re.IGNORECASE)
-        p_match = re.search(r"\bP\s*[:=]?\s*(\d+(?:\.\d+)?)\b", text, re.IGNORECASE)
-        k_match = re.search(r"\bK\s*[:=]?\s*(\d+(?:\.\d+)?)\b", text, re.IGNORECASE)
-        ph_match = re.search(r"\bpH\s*[:=]?\s*(\d+(?:\.\d+)?)\b", text, re.IGNORECASE)
-
-        updates = {}
-        if n_match:
-            updates["soil_n"] = float(n_match.group(1))
-        if p_match:
-            updates["soil_p"] = float(p_match.group(1))
-        if k_match:
-            updates["soil_k"] = float(k_match.group(1))
-        if ph_match:
-            updates["soil_ph"] = float(ph_match.group(1))
-
-        if updates:
-            logging.info("Updating farmer profile with extracted soil values: %s", updates)
-            state.update_profile(**updates)
-
-    def route_and_execute(
+    def __init__(
         self,
-        user_text: str,
-        image_input: Optional[Union[Image.Image, bytes, str, Path]] = None,
-        is_new_image: Optional[bool] = None,
-        image_hash: Optional[str] = None,
-        state: Optional[SessionState] = None,
-        **kwargs,  # CHANGED: Safely absorb any extra keyword arguments
+        client: Optional[genai.Client] = None,
+        model_name: Optional[str] = None,
+        kb_retriever: Optional[KnowledgeBaseRetriever] = None,
+        vision_pipeline: Optional[ModularVisionPipeline] = None,
+    ):
+        load_dotenv(override=False)
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
+        self._client = client
+        self.kb_retriever = kb_retriever or KnowledgeBaseRetriever()
+        self.vision_pipeline = vision_pipeline or ModularVisionPipeline(
+            client=client,
+            model_name=self.model_name,
+        )
+
+    def _get_client(self) -> Optional[genai.Client]:
+        """Lazily initialize Gemini API client when an API key is present."""
+        if self._client is not None:
+            return self._client
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return None
+        self._client = genai.Client(api_key=api_key)
+        return self._client
+
+    @staticmethod
+    def _is_diagnosis_query(text: str) -> bool:
+        """Detect whether a text-only query asks for plant disease/pest diagnosis."""
+        return bool(DIAGNOSIS_KEYWORDS_RE.search(text or ""))
+
+    def _build_text_prompt(
+        self,
+        query: str,
+        kb_context: str,
+        soil_assessment: Dict[str, Any],
+        enforce_five_point: bool,
+    ) -> str:
+        """Construct grounded agronomic prompt for text-only Gemini routing."""
+        taxonomies = ", ".join(SUPPORTED_DATASETS)
+        soil_summary = (
+            f"Soil Parameters -> N: {soil_assessment['n']} kg/ha ({soil_assessment['n_status']}), "
+            f"P: {soil_assessment['p']} kg/ha ({soil_assessment['p_status']}), "
+            f"K: {soil_assessment['k']} kg/ha ({soil_assessment['k_status']}), "
+            f"pH: {soil_assessment['ph']} ({soil_assessment['ph_status']}).\n"
+            f"Soil Notes: {' '.join(soil_assessment['recommendations'])}"
+        )
+        base = (
+            "You are the Crop Intelligence System agricultural advisor.\n"
+            f"Reference taxonomies: {taxonomies}.\n"
+            f"{soil_summary}\n\n"
+            f"ICAR / IIHR / Dataset Context:\n{kb_context}\n\n"
+            f"Farmer Question: {query}\n\n"
+        )
+        if enforce_five_point:
+            return base + (
+                "Respond STRICTLY using the exact 5 numbered points below:\n"
+                "1. **Diagnosis:** <identified condition/issue>\n"
+                "2. **Reason:** <agronomic, pathogen, or nutrient cause>\n"
+                "3. **Chemical Solution:** <targeted chemical control & safe dosage>\n"
+                "4. **Organic Solution:** <organic, biological, and cultural management>\n"
+                "5. **What to do next:** <monitoring, prevention, and follow-up>"
+            )
+        return base + (
+            "Provide a clear, practical, science-backed agronomic answer grounded in the soil "
+            "parameters and ICAR/IIHR context above."
+        )
+
+    def _offline_text_fallback(
+        self,
+        query: str,
+        kb_matches: List[Dict[str, Any]],
+        soil_assessment: Dict[str, Any],
+        enforce_five_point: bool,
+    ) -> str:
+        """Produce a clean grounded response when the Gemini API key is unavailable or fails."""
+        top_entry = kb_matches[0] if kb_matches else {}
+        if enforce_five_point:
+            return FivePointResponseFormatter.enforce_five_point_format(
+                "",
+                fallback_context=top_entry,
+            )
+
+        soil_notes = " ".join(soil_assessment.get("recommendations", []))
+        lines = [
+            f"**Soil Summary (N={soil_assessment['n']}, P={soil_assessment['p']}, "
+            f"K={soil_assessment['k']}, pH={soil_assessment['ph']}):** {soil_notes}"
+        ]
+        if top_entry:
+            lines.append(
+                f"\n**{top_entry['dataset']} — {top_entry['condition']} ({top_entry['crop']}):**\n"
+                f"- **Cause:** {top_entry['pathogen_or_cause']}\n"
+                f"- **Organic Guidance:** {top_entry['organic_solution']}\n"
+                f"- **Next Steps:** {top_entry['next_steps']}"
+            )
+        return "\n".join(lines)
+
+    def route(
+        self,
+        query: str = "",
+        image: Optional[Union[Image.Image, bytes, bytearray, str, Path]] = None,
+        soil_params: Optional[Dict[str, float]] = None,
+        crop_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Analyze input and trigger specialized components strictly based on intent.
+        Route a farmer query (with optional image and soil NPK/pH config) to Gemini 2.5 Flash.
         """
-        if state is None:
-            state = SessionState()
-
-        # Update profile if user provided NPK/pH in text
-        self._extract_soil_overrides(user_text, state)
-
-        text_lower = user_text.lower().strip()
-        modules_run: List[str] = []
-        vision_result: Optional[Dict[str, Any]] = None
-        tabular_result: Optional[Dict[str, Any]] = None
-        weather_result: Optional[Dict[str, Any]] = None
-        rag_results: List[Dict[str, Any]] = []
-        is_followup = False
-
-        # ----------------------------------------------------------------------
-        # Strict Intent Classification
-        # ----------------------------------------------------------------------
-
-        # Tabular Crop Recommendation: User asks what to grow/plant (including natural questions)
-        # CHANGED: Robust regex patterns covering conversational crop queries
-        crop_rec_patterns = [
-            r"\b(which|what)\s+(crop|crops)\b",
-            r"\bwhat\s+(should\s+i|to|can\s+i)?\s*(grow|plant|sow|cultivate)\b",
-            r"\bwhich\s+.*(grow|plant|sow|cultivate)\b",
-            r"\b(grow|plant|sow|cultivate)\s+(some|any|which|what)?\s*(crop|crops|now)\b",
-            r"\b(suggest|recommend|inform|tell|give|show|advise)\b.*?\b(crop|crops|cultivation|growing)\b",
-            r"\b(crop|crops)\s+(recommendation|suitability|advice|suggestion|choice|options?)\b",
-            r"\bsuitable\s+(crop|crops)\b",
-            r"\bbest\s+(crop|crops)\b",
-            r"\bwhat\s+to\s+plant\b",
-            r"\bwhat\s+to\s+grow\b",
-            r"\bcrop\s+to\s+(grow|plant)\b",
-            r"ಯಾವ\s+ಬೆಳೆ",
-            r"ಬೆಳೆ\s+ಶಿಫಾರಸು",
-            r"ಯಾವ\s+ಬೆಳೆ\s+ಬೆಳೆಯಬೇಕು",
-            r"ಬೆಳೆ\s+ಆಯ್ಕೆ",
-        ]
-        wants_crop_rec = any(re.search(pat, text_lower) for pat in crop_rec_patterns)
-
-        # Weather Intelligence: User explicitly asks about weather, rain, forecast, or spray conditions
-        weather_patterns = [
-            r"weather",
-            r"rain",
-            r"raining",
-            r"forecast",
-            r"humidity",
-            r"temperature",
-            r"wind",
-            r"safe\s+to\s+spray",
-            r"spraying\s+weather",
-            r"spray\s+conditions",
-            r"can\s+i\s+spray",
-            r"ಹವಾಮಾನ",
-            r"ಮಳೆ",
-            r"ಉಷ್ಣಾಂಶ",
-            r"ಸಿಂಪಡಣೆಗೆ\s+(ಅನುಕೂಲ|ಸರಿ)",
-        ]
-        wants_weather = any(re.search(pat, text_lower) for pat in weather_patterns)
-
-        # Disease / Pest / Treatment Question or Follow-up
-        disease_patterns = [
-            r"disease",
-            r"blight",
-            r"spot",
-            r"rot",
-            r"rust",
-            r"wilt",
-            r"pest",
-            r"curling",
-            r"curl",
-            r"yellow",
-            r"yellowing",
-            r"chlorosis",
-            r"leaf",
-            r"leaves",
-            r"foliar",
-            r"foliage",
-            r"caterpillar",
-            r"worm",
-            r"cure",
-            r"medicine",
-            r"treat",
-            r"treatment",
-            r"chemical",
-            r"spray",
-            r"fungicide",
-            r"pesticide",
-            r"organic\s+spray",
-            r"dosage",
-            r"how\s+to\s+(cure|control|manage|treat)",
-            r"what\s+(medicine|spray|chemical)\s+should",
-            r"what\s+do\s+i\s+do",
-            r"what\s+should\s+i\s+do",
-            r"help",
-            r"problem",
-            r"issue",
-            r"dying",
-            r"damage",
-            r"infection",
-            r"fungus",
-            r"fungal",
-            r"bacterial",
-            r"viral",
-            r"virus",
-            r"mildew",
-            r"canker",
-            r"scab",
-            r"contagious",
-            r"ರೋಗ",
-            r"ಕೀಟ",
-            r"ಅಂಗಮಾರಿ",
-            r"ಔಷಧಿ",
-            r"ಚಿಕಿತ್ಸೆ",
-            r"ಸಿಂಪಡಿಸಬೇಕು",
-            r"ಹಳದಿ",
-            r"ಎಲೆ",
-        ]
-        wants_disease = any(re.search(pat, text_lower) for pat in disease_patterns)
-
-        if is_new_image is None:
-            has_new_image = image_input is not None
-        else:
-            has_new_image = (image_input is not None) and (is_new_image is True)
-
-        # ----------------------------------------------------------------------
-        # Module Execution
-        # ----------------------------------------------------------------------
-
-        # 1. Vision Module: Run ONLY when a NEW image is uploaded
-        # Requirement 1: Stop using the current leaf/foliar model for app diagnoses.
-        # Requirement 3: Build a new independent model for full-plant and field photos only.
-        if has_new_image:
-            logging.info("AutonomousRouter: Routing image strictly to new Whole-Plant Router Pipeline...")
-            modules_run.append("Whole-Plant Photo Analysis (Independent Model)")
-            detected_crop_hint = kwargs.get("crop_hint", getattr(state.profile, "active_crop", None))
-            if not detected_crop_hint or detected_crop_hint in ["Unknown", "Auto-detect", None]:
-                if "tomato" in text_lower:
-                    detected_crop_hint = "Tomato"
-                elif "corn" in text_lower or "maize" in text_lower:
-                    detected_crop_hint = "Corn (Maize)"
-                elif "apple" in text_lower:
-                    detected_crop_hint = "Apple"
-                elif "cassava" in text_lower:
-                    detected_crop_hint = "Cassava"
-                elif "potato" in text_lower:
-                    detected_crop_hint = "Potato"
-                elif "grape" in text_lower:
-                    detected_crop_hint = "Grape"
-                elif "citrus" in text_lower or "orange" in text_lower or "lemon" in text_lower:
-                    detected_crop_hint = "Citrus"
-                elif "bell pepper" in text_lower or "capsicum" in text_lower:
-                    detected_crop_hint = "Bell Pepper"
-                elif "coconut" in text_lower:
-                    detected_crop_hint = "Coconut"
-
-            detected_part_hint = kwargs.get("part_hint", None)
-            if not detected_part_hint or detected_part_hint in ["Unknown", "Auto-detect", None]:
-                if "leaf" in text_lower or "leaves" in text_lower or "foliar" in text_lower:
-                    detected_part_hint = "leaf"
-                elif "stem" in text_lower or "branch" in text_lower or "stalk" in text_lower:
-                    detected_part_hint = "stem"
-                elif "fruit" in text_lower or "pod" in text_lower or "berry" in text_lower or "grain" in text_lower or "ear" in text_lower:
-                    detected_part_hint = "fruit"
-                elif "root" in text_lower or "tuber" in text_lower:
-                    detected_part_hint = "root"
-                elif "bark" in text_lower or "trunk" in text_lower:
-                    detected_part_hint = "bark"
-                elif "canopy" in text_lower:
-                    detected_part_hint = "canopy"
-                elif "whole" in text_lower or "plant" in text_lower or "field" in text_lower:
-                    detected_part_hint = "whole_plant"
-
-            conf_thresh = kwargs.get("confidence_threshold", 0.40)
-            symptom_desc = kwargs.get("symptom_desc", None)
-            wp_res = self.whole_plant_router.route(
-                image_input,
-                crop_hint=detected_crop_hint,
-                viewpoint_hint=detected_part_hint,
-                user_text=user_text,
-                symptom_desc=symptom_desc,
-                confidence_threshold=conf_thresh,
-            )
-            vision_result = wp_res.to_dict()
-            state.set_vision_result(vision_result, image_hash=image_hash)
-            primary_intent = "disease_diagnosis"
-        elif wants_weather:
-            primary_intent = "weather_query"
-        elif wants_crop_rec:
-            primary_intent = "crop_recommendation"
-        elif wants_disease:
-            primary_intent = "disease_diagnosis"
-        else:
-            primary_intent = "general_query"
-
-        # 2. Conversational Follow-up: If no new image and not asking about weather/crop rec, reuse previous diagnosis
-        last_diag = state.get_last_diagnosis()
-        if not has_new_image and last_diag and not wants_weather and not wants_crop_rec:
-            logging.info("AutonomousRouter: Multi-Turn Continuity -> Reusing previous diagnosis: %s", last_diag.get("top1_label"))
-            vision_result = last_diag
-            is_followup = True
-            primary_intent = "disease_followup"
-            modules_run.append("Conversational Context (Retained Previous Diagnosis)")
-
-        # 3. Weather Module: Run ONLY when explicitly asked
-        if wants_weather:
-            logging.info("AutonomousRouter: Running Weather Module (User explicitly requested weather)...")
-            modules_run.append("Live Weather API (Open-Meteo)")
-            weather_result = self.weather_service.get_weather(
-                district_or_city=state.profile.district
-            )
-
-        # 4. Tabular Crop ML: Run when user asks what crops to grow/plant
-        if wants_crop_rec and not has_new_image:
-            logging.info("AutonomousRouter: Running Tabular Crop Pipeline for %s...", state.profile.district)
-            
-            # CHANGED: Automatically fetch live district weather to provide real environmental values
-            if not weather_result:
-                weather_result = self.weather_service.get_weather(
-                    district_or_city=state.profile.district
-                )
-                if "Live Weather API (Open-Meteo)" not in modules_run:
-                    modules_run.append("Live Weather API (Open-Meteo)")
-
-            temp_val = weather_result.get("temperature_c", 26.0) if weather_result else 26.0
-            hum_val = weather_result.get("humidity_pct", 70.0) if weather_result else 70.0
-            rainfall_val = 150.0  # Seasonal baseline for semi-arid / Northern Dry Zone (e.g. Belagavi)
-
-            modules_run.append("Tabular ML (RandomForest Suitability)")
-            tabular_result = self.tabular_predictor.predict(
-                n=state.profile.soil_n,
-                p=state.profile.soil_p,
-                k=state.profile.soil_k,
-                temp=temp_val,
-                humidity=hum_val,
-                ph=state.profile.soil_ph,
-                rainfall=rainfall_val,
-                top_k=5,
-            )
-
-        # 5. RAG Retrieval Module: Retrieve specific agronomic guidelines
-        rag_query = ""
-        is_supported_or_confident = (
-            vision_result
-            and (
-                vision_result.get("supported") is True
-                or vision_result.get("status") in ["confident", "probable_diagnosis_needs_confirmation"]
-            )
+        clean_query = (query or "").strip()
+        params = soil_params or {}
+        soil_assessment = self.kb_retriever.get_soil_advisory(
+            n=float(params.get("n", 90.0)),
+            p=float(params.get("p", 42.0)),
+            k=float(params.get("k", 43.0)),
+            ph=float(params.get("ph", 6.5)),
         )
-        if has_new_image and is_supported_or_confident:
-            top_diag = vision_result.get("top1_label") or vision_result.get("disease", "")
-            # CHANGED: When image and specific text are submitted together, combine diagnosis with farmer query
-            generic_prompts = [
-                "analyze this plant image and identify any health issues or diseases.",
-                "please inspect this uploaded plant photograph.",
-                "please diagnose the disease on this leaf.",
-                "please identify the disease on this tomato plant.",
-                "please analyze this full-plant tomato crop.",
-                "please analyze this image.",
-                "please check this sample.",
-            ]
-            clean_text = user_text.strip().lower()
-            if clean_text and clean_text not in generic_prompts:
-                rag_query = f"{top_diag} {user_text} ICAR symptoms remedy chemical dosage"
-            else:
-                rag_query = f"{top_diag} ICAR symptoms, organic remedy and chemical dosage"
-        elif is_followup and is_supported_or_confident:
-            top_diag = vision_result.get("top1_label") or vision_result.get("disease", "")
-            rag_query = f"{top_diag} {user_text} ICAR dosage treatment"
-        elif wants_crop_rec and tabular_result:
-            # CHANGED: Retrieve crop-specific agronomic practices tailored to district and agro-climatic zone
-            rag_query = f"{tabular_result['top_crop']} cultivation practices soil climate ICAR {state.profile.district}"
-        elif wants_disease:
-            rag_query = user_text
 
-        if rag_query:
-            logging.info("AutonomousRouter: Retrieving RAG knowledge for: '%s'", rag_query)
-            modules_run.append("RAG Knowledge Engine (FAISS + MiniLM-L6)")
-            rag_results = self.retriever.retrieve(rag_query, top_k=2)
+        kb_query = clean_query or crop_hint or "crop leaf disease diagnosis"
+        kb_matches = self.kb_retriever.retrieve(kb_query, crop_hint=crop_hint, top_k=3)
+        kb_context = self.kb_retriever.format_context(kb_matches)
+
+        # 1. Multimodal Image Path -> always strict 5-point diagnosis
+        if image is not None:
+            vision_out = self.vision_pipeline.analyze(
+                image_input=image,
+                user_query=clean_query or "Diagnose this crop image and provide a 5-point advisory.",
+                kb_context=kb_context,
+                soil_assessment=soil_assessment,
+                fallback_entry=kb_matches[0] if kb_matches else None,
+            )
+            response_text = vision_out["response"]
+            return {
+                "response": response_text,
+                "mode": "multimodal_diagnosis",
+                "model": vision_out["model"],
+                "taxonomies": list(SUPPORTED_DATASETS),
+                "kb_matches": kb_matches,
+                "soil_assessment": soil_assessment,
+                "image_metadata": vision_out["image_metadata"],
+                "used_live_api": vision_out["used_live_api"],
+                "is_five_point": FivePointResponseFormatter.validate_five_point_format(response_text),
+                "error": vision_out.get("error"),
+            }
+
+        # 2. Text-Only Path
+        if not clean_query:
+            clean_query = "Provide a crop and soil health summary based on my current NPK parameters."
+
+        enforce_five_point = self._is_diagnosis_query(clean_query)
+        prompt = self._build_text_prompt(
+            query=clean_query,
+            kb_context=kb_context,
+            soil_assessment=soil_assessment,
+            enforce_five_point=enforce_five_point,
+        )
+
+        client = self._get_client()
+        used_live_api = False
+        error: Optional[str] = None
+        response_text = ""
+
+        if client is not None:
+            try:
+                api_response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.25),
+                )
+                raw_text = (getattr(api_response, "text", None) or "").strip()
+                if raw_text:
+                    response_text = (
+                        FivePointResponseFormatter.enforce_five_point_format(
+                            raw_text,
+                            fallback_context=kb_matches[0] if kb_matches else None,
+                        )
+                        if enforce_five_point
+                        else raw_text
+                    )
+                    used_live_api = True
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)
+
+        if not response_text:
+            response_text = self._offline_text_fallback(
+                query=clean_query,
+                kb_matches=kb_matches,
+                soil_assessment=soil_assessment,
+                enforce_five_point=enforce_five_point,
+            )
+            if error is None and client is None:
+                error = "GEMINI_API_KEY not configured"
 
         return {
-            "modules_run": modules_run,
-            "primary_intent": primary_intent,
-            "user_text": user_text,  # CHANGED: Preserved user_text for multimodal synthesis
-            "is_followup": is_followup,
-            "vision_result": vision_result,
-            "tabular_result": tabular_result,
-            "weather_result": weather_result,
-            "rag_results": rag_results,
-            "farmer_profile": state.profile,
-            "recent_history": state.get_recent_history(max_turns=6),
-            "image_input": image_input,
+            "response": response_text,
+            "mode": "text_diagnosis" if enforce_five_point else "agronomic_chat",
+            "model": self.model_name,
+            "taxonomies": list(SUPPORTED_DATASETS),
+            "kb_matches": kb_matches,
+            "soil_assessment": soil_assessment,
+            "image_metadata": None,
+            "used_live_api": used_live_api,
+            "is_five_point": (
+                FivePointResponseFormatter.validate_five_point_format(response_text)
+                if enforce_five_point
+                else False
+            ),
+            "error": error,
         }

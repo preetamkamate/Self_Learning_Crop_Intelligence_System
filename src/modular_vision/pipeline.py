@@ -1,443 +1,363 @@
 """
-Unified Modular Crop Vision Pipeline.
-Coordinates:
-1. Modular Crop ID (CropIdentifier)
-2. Viewpoint & Organ Router (ViewpointRouter for leaf, stem/branch, fruit, canopy, whole plant, root)
-3. Pest Detection (PestDetector)
-4. Disease Classification (ModularDiseaseClassifier for leaf & field pathology)
-5. Honest Photo Guidance (PhotoGuidanceEngine)
+Multimodal Vision Pipeline & 5-Point Response Formatter.
 
-Core Rule:
-Enables diagnosis ONLY with verified real labeled data and a tested exact route;
-otherwise provides honest photo guidance. Never guesses disease or chemical treatment.
+Zero local `.pt`/`.pth` weight bottlenecks: normalizes uploaded crop images in-memory
+and sends multimodal payloads directly to Google Gemini (`gemini-2.5-flash`), enforcing
+a strict 5-point diagnostic output format.
 """
-from dataclasses import asdict, dataclass, field
-import logging
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from PIL import Image
 
-from src.modular_vision.crop_id import CropIdentifier
-from src.modular_vision.disease_classifier import ModularDiseaseClassifier
-from src.modular_vision.pest_detector import PestDetector
-from src.modular_vision.photo_guidance import get_photo_guidance
-from src.modular_vision.viewpoint_router import ViewpointRouter
+from google import genai
+from google.genai import types
+from PIL import Image, ImageOps
 
-logger = logging.getLogger(__name__)
+from src.rag.kb_retriever import SUPPORTED_DATASETS
+
+REQUIRED_SECTIONS: Tuple[str, ...] = (
+    "Diagnosis",
+    "Reason",
+    "Chemical Solution",
+    "Organic Solution",
+    "What to do next",
+)
+
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 
-@dataclass
-class ModularVisionResult:
-    """Unified diagnosis and guidance output structure."""
-    plant_detected: bool = True
-    crop: str = "Unknown"
-    viewpoint: str = "leaf"
-    supported: bool = False
-    disease: Optional[str] = None
-    confidence: float = 0.0
-    status: str = "unsupported"
-    fallback_reason: str = ""
-    checkpoint_path: str = "None"
-    selected_model: str = "None"
-    top1_label: str = ""
-    predictions: List[Dict[str, Any]] = field(default_factory=list)
-    pest_info: Optional[Dict[str, Any]] = None
-    photo_guidance: Optional[Dict[str, Any]] = None
-    source_evidence: Optional[Dict[str, Any]] = None
-    is_healthy: bool = False
-    margin: float = 0.0
-    chemical_treatment_withheld: bool = False
-    model_release_tier: str = "EXPERIMENTAL (58.33% Held-Out Accuracy)"
-    is_experimental: bool = True
-    debug_info: Dict[str, Any] = field(default_factory=dict)
+@dataclass(frozen=True)
+class EncodedImage:
+    """Normalized image payload ready for multimodal Gemini inference."""
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary with full backward-compatibility fields."""
-        data = {
-            "plant_detected": self.plant_detected,
-            "crop": self.crop,
-            "crop_species": self.crop,
-            "viewpoint": self.viewpoint,
-            "plant_part": self.viewpoint,
-            "supported": self.supported,
-            "disease": self.disease,
-            "confidence": self.confidence,
-            "top1_confidence": round(self.confidence * 100, 2),
-            "status": self.status,
-            "fallback_reason": self.fallback_reason,
-            "checkpoint_path": self.checkpoint_path,
-            "model_path": self.checkpoint_path,
-            "selected_model": self.selected_model,
-            "top1_label": self.top1_label or (self.disease if self.supported and self.disease else self.fallback_reason),
-            "predictions": self.predictions,
-            "pest_info": self.pest_info,
-            "photo_guidance": self.photo_guidance,
-            "source_evidence": self.source_evidence,
-            "is_healthy": self.is_healthy,
-            "margin": self.margin,
-            "chemical_treatment_withheld": self.chemical_treatment_withheld,
-            "model_release_tier": self.model_release_tier,
-            "is_experimental": self.is_experimental,
-            "debug_info": {
-                "crop_route": self.crop,
-                "viewpoint_route": self.viewpoint,
-                "selected_model": self.selected_model,
-                "checkpoint_path": self.checkpoint_path,
-                "stage4_route_supported": self.supported,
-                "fallback_reason": self.fallback_reason,
-                "disease": self.disease,
-                "status": self.status,
-                "margin": self.margin,
-                "chemical_treatment_withheld": self.chemical_treatment_withheld,
-                "model_release_tier": self.model_release_tier,
-                **self.debug_info,
-            },
+    data: bytes
+    mime_type: str
+    width: int
+    height: int
+    sha256: str
+
+    def to_genai_part(self) -> types.Part:
+        """Convert normalized image bytes into a Google GenAI multimodal Part."""
+        return types.Part.from_bytes(data=self.data, mime_type=self.mime_type)
+
+    def metadata(self) -> Dict[str, Any]:
+        """Return lightweight non-binary metadata for logging and UI badges."""
+        return {
+            "mime_type": self.mime_type,
+            "width": self.width,
+            "height": self.height,
+            "bytes": len(self.data),
+            "sha256": self.sha256[:12],
         }
-        return data
 
 
-class ModularCropVisionPipeline:
-    """Unified Modular Crop Vision Architecture."""
+class MultimodalImageEncoder:
+    """In-memory multimodal image encoder using Pillow (no local neural checkpoints)."""
+
+    def __init__(self, max_dimension: int = 1024, jpeg_quality: int = 90):
+        self.max_dimension = max_dimension
+        self.jpeg_quality = jpeg_quality
+
+    def encode(
+        self,
+        image_input: Union[Image.Image, bytes, bytearray, io.BytesIO, str, Path],
+    ) -> EncodedImage:
+        """Load, orient, resize, and JPEG-encode an input image cleanly."""
+        if isinstance(image_input, Image.Image):
+            img = image_input.copy()
+        elif isinstance(image_input, (bytes, bytearray)):
+            img = Image.open(io.BytesIO(bytes(image_input)))
+        elif isinstance(image_input, (str, Path)):
+            img = Image.open(Path(image_input))
+        elif hasattr(image_input, "read"):
+            raw = image_input.read()
+            if hasattr(image_input, "seek"):
+                image_input.seek(0)
+            img = Image.open(io.BytesIO(raw))
+        else:
+            raise TypeError(f"Unsupported image input type: {type(image_input)!r}")
+
+        img = ImageOps.exif_transpose(img)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
+        width, height = img.size
+        if max(width, height) > self.max_dimension:
+            img.thumbnail((self.max_dimension, self.max_dimension), Image.Resampling.LANCZOS)
+            width, height = img.size
+
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=self.jpeg_quality, optimize=True)
+        encoded_bytes = buffer.getvalue()
+        digest = hashlib.sha256(encoded_bytes).hexdigest()
+
+        return EncodedImage(
+            data=encoded_bytes,
+            mime_type="image/jpeg",
+            width=width,
+            height=height,
+            sha256=digest,
+        )
+
+
+class FivePointResponseFormatter:
+    """Enforces the strict 5-point diagnostic output structure."""
+
+    SECTION_ALIASES: Dict[str, Tuple[str, ...]] = {
+        "Diagnosis": ("diagnosis", "condition", "identification", "disease"),
+        "Reason": ("reason", "cause", "causes", "etiology", "why"),
+        "Chemical Solution": ("chemical solution", "chemical control", "chemical treatment", "chemical"),
+        "Organic Solution": ("organic solution", "organic control", "biological solution", "organic"),
+        "What to do next": ("what to do next", "next steps", "action plan", "preventive measures", "next"),
+    }
+
+    @classmethod
+    def format_from_dict(cls, sections: Dict[str, str]) -> str:
+        """Render a canonical numbered 5-point markdown block from a dictionary."""
+        lines: List[str] = []
+        for idx, heading in enumerate(REQUIRED_SECTIONS, start=1):
+            body = (sections.get(heading) or "").strip()
+            if not body:
+                body = "Consult local ICAR/IIHR extension guidelines for field verification."
+            lines.append(f"{idx}. **{heading}:** {body}")
+        return "\n\n".join(lines)
+
+    @classmethod
+    def _match_heading(cls, line: str) -> Optional[Tuple[str, str]]:
+        """Detect if a line begins with one of the 5 required headings."""
+        cleaned = re.sub(r"^[#*\-\s\d.)]+", "", line).strip()
+        cleaned_no_md = re.sub(r"\*{1,2}|_{1,2}", "", cleaned).strip()
+        lowered = cleaned_no_md.lower()
+
+        for canonical, aliases in cls.SECTION_ALIASES.items():
+            for alias in aliases:
+                pattern = rf"^{re.escape(alias)}\s*(?:[:\-–—]\s*(.*))?$"
+                match = re.match(pattern, lowered, flags=re.IGNORECASE)
+                if match:
+                    # Extract original-cased trailing text after separator
+                    orig_match = re.match(
+                        rf"^{re.escape(alias)}\s*(?:[:\-–—]\s*(.*))?$",
+                        cleaned_no_md,
+                        flags=re.IGNORECASE,
+                    )
+                    remainder = orig_match.group(1).strip() if orig_match and orig_match.group(1) else ""
+                    return canonical, remainder
+        return None
+
+    @classmethod
+    def enforce_five_point_format(
+        cls,
+        raw_text: str,
+        fallback_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Normalize raw LLM or KB text into the strict 5-point output format."""
+        raw_text = (raw_text or "").strip()
+        parsed: Dict[str, str] = {key: "" for key in REQUIRED_SECTIONS}
+
+        # 1. Try JSON payload if Gemini returned structured JSON
+        if raw_text.startswith("{") and raw_text.endswith("}"):
+            try:
+                data = json.loads(raw_text)
+                if isinstance(data, dict):
+                    lower_map = {str(k).strip().lower(): str(v).strip() for k, v in data.items()}
+                    for canonical, aliases in cls.SECTION_ALIASES.items():
+                        for alias in aliases:
+                            if alias in lower_map and lower_map[alias]:
+                                parsed[canonical] = lower_map[alias]
+                                break
+                    if any(parsed.values()):
+                        return cls._fill_and_render(parsed, raw_text, fallback_context)
+            except json.JSONDecodeError:
+                pass
+
+        # 2. Parse line-by-line section headers
+        current_section: Optional[str] = None
+        buckets: Dict[str, List[str]] = {key: [] for key in REQUIRED_SECTIONS}
+
+        for line in raw_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            detected = cls._match_heading(stripped)
+            if detected:
+                current_section, remainder = detected
+                if remainder:
+                    buckets[current_section].append(remainder)
+            elif current_section:
+                buckets[current_section].append(stripped)
+
+        for key in REQUIRED_SECTIONS:
+            parsed[key] = " ".join(buckets[key]).strip()
+
+        return cls._fill_and_render(parsed, raw_text, fallback_context)
+
+    @classmethod
+    def _fill_and_render(
+        cls,
+        parsed: Dict[str, str],
+        raw_text: str,
+        fallback_context: Optional[Dict[str, Any]],
+    ) -> str:
+        """Fill any missing sections from grounded fallback context and render."""
+        ctx = fallback_context or {}
+        defaults = {
+            "Diagnosis": ctx.get("condition")
+            or (raw_text[:240] if raw_text and not any(parsed.values()) else "Crop condition requires closer inspection."),
+            "Reason": ctx.get("pathogen_or_cause")
+            or "Environmental stress, nutrient imbalance, or foliar pathogen pressure may be contributing.",
+            "Chemical Solution": ctx.get("chemical_solution")
+            or "Apply a targeted, label-approved fungicide or pesticide only after confirming threshold levels.",
+            "Organic Solution": ctx.get("organic_solution")
+            or "Apply Neem oil (Azadirachtin 1500 ppm at 3–5 mL/L) or Trichoderma/Pseudomonas bio-agents.",
+            "What to do next": ctx.get("next_steps")
+            or "Capture a clear close-up photo in natural light, inspect neighboring plants, and monitor for 5–7 days.",
+        }
+        finalized = {key: (parsed.get(key) or defaults[key]).strip() for key in REQUIRED_SECTIONS}
+        return cls.format_from_dict(finalized)
+
+    @classmethod
+    def validate_five_point_format(cls, formatted_text: str) -> bool:
+        """Return True if all 5 required headings appear in strict order with content."""
+        if not formatted_text:
+            return False
+        positions: List[int] = []
+        for idx, heading in enumerate(REQUIRED_SECTIONS, start=1):
+            pattern = re.compile(
+                rf"(?im)^\s*{idx}\.\s+\*{{0,2}}{re.escape(heading)}\*{{0,2}}\s*:\s*\S+",
+            )
+            match = pattern.search(formatted_text)
+            if not match:
+                return False
+            positions.append(match.start())
+        return positions == sorted(positions)
+
+
+class ModularVisionPipeline:
+    """Multimodal Gemini vision pipeline grounded on the 5 supported taxonomies."""
 
     def __init__(
         self,
-        crop_identifier: Optional[CropIdentifier] = None,
-        viewpoint_router: Optional[ViewpointRouter] = None,
-        pest_detector: Optional[PestDetector] = None,
-        disease_classifier: Optional[ModularDiseaseClassifier] = None,
+        client: Optional[genai.Client] = None,
+        model_name: Optional[str] = None,
+        encoder: Optional[MultimodalImageEncoder] = None,
     ):
-        self.crop_identifier = crop_identifier or CropIdentifier()
-        self.viewpoint_router = viewpoint_router or ViewpointRouter()
-        self.pest_detector = pest_detector or PestDetector()
-        self.disease_classifier = disease_classifier or ModularDiseaseClassifier()
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
+        self.encoder = encoder or MultimodalImageEncoder()
+        self._client = client
 
-    def diagnose(
+    def _get_client(self) -> Optional[genai.Client]:
+        """Lazily construct a Gemini client if GEMINI_API_KEY is available."""
+        if self._client is not None:
+            return self._client
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return None
+        self._client = genai.Client(api_key=api_key)
+        return self._client
+
+    def build_diagnosis_prompt(
         self,
-        image_input: Union[Image.Image, Path, str, bytes],
-        crop_hint: Optional[str] = None,
-        viewpoint_hint: Optional[str] = None,
-        user_text: Optional[str] = None,
-        symptom_desc: Optional[str] = None,
-        confidence_threshold: float = 0.25,
-    ) -> ModularVisionResult:
-        """
-        Execute modular agricultural vision evaluation.
-        1. Crop ID
-        2. Viewpoint & Organ Route
-        3. Pest Screening
-        4. Verified Pathology Diagnosis (or Honest Photo Guidance)
-        """
-        # Step 1: Crop Identification
-        crop_res = self.crop_identifier.identify_crop(
-            image_input=image_input,
-            crop_hint=crop_hint,
+        user_query: str,
+        kb_context: str,
+        soil_assessment: Dict[str, Any],
+    ) -> str:
+        """Build a concise, grounded prompt enforcing the 5-point output format."""
+        taxonomies = ", ".join(SUPPORTED_DATASETS)
+        soil_line = (
+            f"Soil Profile -> N: {soil_assessment.get('n')} ({soil_assessment.get('n_status')}), "
+            f"P: {soil_assessment.get('p')} ({soil_assessment.get('p_status')}), "
+            f"K: {soil_assessment.get('k')} ({soil_assessment.get('k_status')}), "
+            f"pH: {soil_assessment.get('ph')} ({soil_assessment.get('ph_status')})."
+        )
+        return (
+            "You are the Crop Intelligence System multimodal agronomist.\n"
+            f"Evaluate the plant image against these 5 reference taxonomies: {taxonomies}.\n"
+            f"User request: {user_query or 'Diagnose this plant image.'}\n"
+            f"{soil_line}\n\n"
+            f"Grounded ICAR / IIHR / Dataset Reference Context:\n{kb_context}\n\n"
+            "INSTRUCTIONS:\n"
+            "- If the image is NOT a plant/crop, state that clearly under Diagnosis and explain how to retake.\n"
+            "- Respond STRICTLY using the exact 5 numbered points below (no extra sections):\n"
+            "1. **Diagnosis:** <crop, taxonomy match if applicable, and condition>\n"
+            "2. **Reason:** <pathogen/pest/nutrient/environmental cause>\n"
+            "3. **Chemical Solution:** <targeted synthetic treatment & safe dosage guidance>\n"
+            "4. **Organic Solution:** <bio-control, botanical, and cultural solution>\n"
+            "5. **What to do next:** <field scouting, sanitation, and preventive follow-up>"
         )
 
-        if not crop_res.is_plant:
-            guidance = get_photo_guidance(viewpoint="leaf", is_non_plant=True)
-            return ModularVisionResult(
-                plant_detected=False,
-                crop="None",
-                viewpoint="non_plant",
-                supported=False,
-                disease=None,
-                confidence=0.0,
-                status="out_of_distribution",
-                fallback_reason="Non-plant image detected.",
-                top1_label="Non-plant image detected",
-                checkpoint_path="None",
-                selected_model="None",
-                photo_guidance=guidance,
-            )
+    def analyze(
+        self,
+        image_input: Union[Image.Image, bytes, bytearray, io.BytesIO, str, Path],
+        user_query: str = "Diagnose this crop image.",
+        kb_context: str = "",
+        soil_assessment: Optional[Dict[str, Any]] = None,
+        fallback_entry: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Encode image, invoke Gemini `gemini-2.5-flash`, and enforce 5-point output."""
+        encoded = self.encoder.encode(image_input)
+        soil_info = soil_assessment or {"n": 90, "p": 42, "k": 43, "ph": 6.5}
+        prompt = self.build_diagnosis_prompt(user_query, kb_context, soil_info)
 
-        crop = crop_res.canonical_name
+        client = self._get_client()
+        if client is None:
+            fallback_text = FivePointResponseFormatter.enforce_five_point_format(
+                "",
+                fallback_context={
+                    **(fallback_entry or {}),
+                    "condition": (
+                        "Live Gemini Vision API key is not configured; displaying grounded "
+                        f"reference advisory ({(fallback_entry or {}).get('condition', 'General Crop Check')})."
+                    ),
+                },
+            )
+            return {
+                "response": fallback_text,
+                "image_metadata": encoded.metadata(),
+                "used_live_api": False,
+                "model": self.model_name,
+                "error": "GEMINI_API_KEY not configured",
+            }
 
-        # If crop is unconfirmed, visually detect crop and anatomical part via DINOv2
-        if crop == "Unknown":
-            try:
-                from src.vision.predict import PlantDiseasePredictor
-                v_pred = PlantDiseasePredictor().predict(image_input=image_input)
-                det_crop = v_pred.get("crop_species")
-                det_part = v_pred.get("plant_part")
-                if det_crop and det_crop not in ["Unknown", "Unknown Crop"]:
-                    crop = self.crop_identifier.normalize_crop_name(det_crop)
-                    crop_res.canonical_name = crop
-                    crop_res.is_verified_dataset_crop = crop in self.crop_identifier.verified_crops
-                if viewpoint_hint in [None, "unknown", "auto", "Auto-detect"] and det_part and det_part != "unknown":
-                    viewpoint_hint = det_part
-                if v_pred.get("supported"):
-                    dis = v_pred.get("disease") or v_pred.get("top1_label")
-                    return ModularVisionResult(
-                        plant_detected=True,
-                        crop=crop if crop != "Unknown" else (det_crop or "Tomato"),
-                        viewpoint=det_part or "leaf",
-                        supported=True,
-                        disease=dis,
-                        confidence=float(v_pred.get("top1_confidence", 0.0)) / 100.0,
-                        status=v_pred.get("status", "confident"),
-                        fallback_reason="",
-                        top1_label=dis,
-                        checkpoint_path=v_pred.get("model_path", "models/vision/"),
-                        selected_model="PlantDiseasePredictor",
-                        predictions=v_pred.get("predictions", []),
-                        source_evidence=v_pred.get("source_evidence"),
-                        is_healthy=v_pred.get("is_healthy", False),
-                        margin=v_pred.get("margin", 0.0),
-                        chemical_treatment_withheld=v_pred.get("chemical_treatment_withheld", False),
-                    )
-            except Exception as e:
-                logger.warning("Pipeline visual crop identification fallback: %s", e)
-
-        # Step 2: Viewpoint Routing across the 6 anatomical viewpoints
-        # (leaf, stem_branch, fruit, canopy, whole_plant, root)
-        vp_res = self.viewpoint_router.route_viewpoint(
-            crop=crop,
-            viewpoint_hint=viewpoint_hint,
-        )
-        canonical_vp = vp_res.canonical_viewpoint
-
-        # Step 3: Pest Detection Screening
-        # ONLY route to pest_detector if user explicitly asks solely about insects/pests AND a trained checkpoint exists.
-        # Never let an untrained pest route block a valid disease prediction across any supported crop or plant part.
-        is_sole_pest = (
-            hasattr(self.pest_detector, "is_sole_pest_query")
-            and self.pest_detector.is_sole_pest_query(user_text, symptom_desc)
-        )
-        if is_sole_pest and self.pest_detector.is_trained:
-            pest_res = self.pest_detector.detect_pest(
-                image_input=image_input,
-                crop=crop,
-                viewpoint=canonical_vp,
-                user_text=user_text,
-                symptom_desc=symptom_desc,
+        try:
+            api_response = client.models.generate_content(
+                model=self.model_name,
+                contents=[encoded.to_genai_part(), prompt],
+                config=types.GenerateContentConfig(temperature=0.2),
             )
-            if pest_res.supported:
-                return ModularVisionResult(
-                    plant_detected=True,
-                    crop=crop,
-                    viewpoint=canonical_vp,
-                    supported=True,
-                    disease=pest_res.pest_label,
-                    confidence=pest_res.confidence,
-                    status=pest_res.status,
-                    fallback_reason="",
-                    top1_label=pest_res.pest_label or "Pest Detected",
-                    checkpoint_path=str(self.pest_detector.model_path),
-                    selected_model="PestScoutingEngine",
-                    pest_info=pest_res.to_dict(),
-                    photo_guidance=pest_res.photo_guidance,
-                    debug_info={"pest_suspected": True, "ipm_advice": pest_res.ipm_scouting_advice},
-                )
-
-        # Step 4: Route-Specific Disease Diagnosis
-        # Only diagnose if exact verified route is deployed; otherwise provide honest guidance
-
-        # Case A: Unsupported crop
-        if not crop_res.is_verified_dataset_crop or crop == "Unknown":
-            # If user explicitly specified an unsupported crop (e.g. Cotton, Banana, Sugarcane), provide honest guidance
-            if crop != "Unknown":
-                guidance = get_photo_guidance(viewpoint=canonical_vp, crop=crop, is_unsupported_crop=True)
-                reason = f"Valid plant image detected, but diagnosis is not trained yet for crop '{crop}'."
-                return ModularVisionResult(
-                    plant_detected=True,
-                    crop=crop,
-                    viewpoint=canonical_vp,
-                    supported=False,
-                    disease=None,
-                    confidence=0.0,
-                    status="unsupported_crop",
-                    fallback_reason=reason,
-                    top1_label=reason,
-                    checkpoint_path="None",
-                    selected_model="None",
-                    photo_guidance=guidance,
-                    debug_info={"crop_verified": False, "crop": crop},
-                )
-            else:
-                # Fall back to DINOv2 visual feature matching for unknown crop photos
-                try:
-                    from src.whole_plant.predict import WholePlantPredictor, DEFAULT_MODEL_PATH
-                    wp_pred = WholePlantPredictor(model_path=DEFAULT_MODEL_PATH)
-                    tensor, _ = wp_pred._preprocess(image_input)
-                    with torch.no_grad():
-                        logits = wp_pred.model(tensor)
-                        probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
-                    top_idx = int(np.argmax(probs))
-                    top_lbl = wp_pred.classes[top_idx]
-                    top_conf = float(probs[top_idx])
-                    matched_crop = "Tomato"
-                    for c_name in ["Tomato", "Corn (Maize)", "Apple", "Cassava"]:
-                        if c_name.lower() in top_lbl.lower() or (c_name == "Corn (Maize)" and "corn" in top_lbl.lower()):
-                            matched_crop = c_name
-                            break
-                    return ModularVisionResult(
-                        plant_detected=True,
-                        crop=matched_crop,
-                        viewpoint=canonical_vp if canonical_vp != "unknown" else "leaf",
-                        supported=True,
-                        disease=top_lbl,
-                        confidence=round(top_conf, 3),
-                        status="confident",
-                        fallback_reason="Identified via DINOv2 Visual Feature Similarity Matching",
-                        checkpoint_path=str(DEFAULT_MODEL_PATH),
-                        selected_model="DINOv2 Visual Similarity Engine",
-                        top1_label=top_lbl,
-                        predictions=[{"label": wp_pred.classes[i], "prob": round(float(probs[i]), 4)} for i in np.argsort(-probs)[:3]],
-                        is_healthy="healthy" in top_lbl.lower(),
-                        margin=0.20,
-                        chemical_treatment_withheld=False,
-                    )
-                except Exception as e:
-                    logger.warning("DINOv2 fallback exception: %s", e)
-
-        # Case B: Verified crop + Leaf viewpoint -> Call verified foliar model
-        if canonical_vp == "leaf":
-            leaf_res = self.disease_classifier.classify_leaf_disease(
-                image_input=image_input,
-                crop=crop,
-                confidence_threshold=confidence_threshold,
+            raw_text = (getattr(api_response, "text", None) or "").strip()
+            formatted = FivePointResponseFormatter.enforce_five_point_format(
+                raw_text,
+                fallback_context=fallback_entry,
             )
-            top1 = (
-                leaf_res.disease
-                if (leaf_res.supported and leaf_res.disease)
-                else (f"Healthy {crop} Leaf" if leaf_res.is_healthy else leaf_res.status_reason)
+            return {
+                "response": formatted,
+                "image_metadata": encoded.metadata(),
+                "used_live_api": True,
+                "model": self.model_name,
+                "error": None,
+            }
+        except Exception as exc:  # noqa: BLE001 - graceful resilience on network/API failures
+            formatted = FivePointResponseFormatter.enforce_five_point_format(
+                "",
+                fallback_context={
+                    **(fallback_entry or {}),
+                    "condition": (
+                        f"Vision API call unavailable ({type(exc).__name__}); showing grounded "
+                        f"ICAR/IIHR fallback advisory."
+                    ),
+                },
             )
-            return ModularVisionResult(
-                plant_detected=True,
-                crop=crop,
-                viewpoint="leaf",
-                supported=leaf_res.supported,
-                disease=leaf_res.disease,
-                confidence=leaf_res.confidence,
-                status=leaf_res.status,
-                fallback_reason=leaf_res.status_reason,
-                checkpoint_path=leaf_res.checkpoint_path,
-                selected_model=leaf_res.selected_model,
-                top1_label=top1,
-                predictions=leaf_res.predictions,
-                source_evidence=leaf_res.source_evidence,
-                photo_guidance=leaf_res.photo_guidance,
-                is_healthy=leaf_res.is_healthy,
-                margin=getattr(leaf_res, "margin", 0.0),
-                chemical_treatment_withheld=getattr(leaf_res, "chemical_treatment_withheld", False),
-                model_release_tier=getattr(leaf_res, "model_release_tier", "EXPERIMENTAL (58.33% Held-Out Accuracy)"),
-                is_experimental=getattr(leaf_res, "is_experimental", True),
-                debug_info=leaf_res.debug_info,
-            )
-
-        # Case C: Field views (whole_plant, canopy)
-        if canonical_vp in ["whole_plant", "canopy"]:
-            field_res = self.disease_classifier.classify_field_disease(
-                image_input=image_input,
-                crop=crop,
-                viewpoint=canonical_vp,
-                confidence_threshold=confidence_threshold,
-            )
-            top1 = (
-                field_res.disease
-                if (field_res.supported and field_res.disease)
-                else (f"Healthy {crop} {canonical_vp.replace('_', ' ').title()}" if field_res.is_healthy else field_res.status_reason)
-            )
-            return ModularVisionResult(
-                plant_detected=True,
-                crop=crop,
-                viewpoint=canonical_vp,
-                supported=field_res.supported,
-                disease=field_res.disease,
-                confidence=field_res.confidence,
-                status=field_res.status,
-                fallback_reason=field_res.status_reason,
-                top1_label=top1,
-                checkpoint_path=field_res.checkpoint_path,
-                selected_model=field_res.selected_model,
-                predictions=field_res.predictions,
-                source_evidence=field_res.source_evidence,
-                photo_guidance=field_res.photo_guidance,
-                is_healthy=field_res.is_healthy,
-                margin=getattr(field_res, "margin", 0.0),
-                chemical_treatment_withheld=getattr(field_res, "chemical_treatment_withheld", False),
-                model_release_tier=getattr(field_res, "model_release_tier", "VALIDATED MULTI-PART (Held-Out Benchmark)"),
-                is_experimental=getattr(field_res, "is_experimental", False),
-                debug_info=field_res.debug_info,
-            )
-
-        # Case D: Specialized organ views (stem_branch, fruit, root, bark_trunk)
-        if canonical_vp in ["stem_branch", "fruit", "root", "bark_trunk"]:
-            organ_res = self.disease_classifier.classify_stem_fruit_root_disease(
-                image_input=image_input,
-                crop=crop,
-                viewpoint=canonical_vp,
-            )
-            top1 = (
-                organ_res.disease
-                if (organ_res.supported and organ_res.disease)
-                else (f"Healthy {crop} {canonical_vp.replace('_', ' ').title()}" if organ_res.is_healthy else organ_res.status_reason)
-            )
-            return ModularVisionResult(
-                plant_detected=True,
-                crop=crop,
-                viewpoint=canonical_vp,
-                supported=organ_res.supported,
-                disease=organ_res.disease,
-                confidence=organ_res.confidence,
-                status=organ_res.status,
-                fallback_reason=organ_res.status_reason,
-                top1_label=top1,
-                checkpoint_path=organ_res.checkpoint_path,
-                selected_model=organ_res.selected_model,
-                predictions=organ_res.predictions,
-                source_evidence=organ_res.source_evidence,
-                photo_guidance=organ_res.photo_guidance,
-                is_healthy=organ_res.is_healthy,
-                margin=getattr(organ_res, "margin", 0.0),
-                chemical_treatment_withheld=getattr(organ_res, "chemical_treatment_withheld", False),
-                model_release_tier=getattr(organ_res, "model_release_tier", "VALIDATED MULTI-PART (Held-Out Benchmark)"),
-                is_experimental=getattr(organ_res, "is_experimental", False),
-                debug_info=organ_res.debug_info,
-            )
-
-        # Case E: Unknown viewpoint / Auto-detect
-        from src.vision.predict import PlantDiseasePredictor
-        auto_pred = PlantDiseasePredictor().predict(
-            image_input=image_input,
-            user_crop_hint=crop if crop != "Unknown" else None,
-        )
-        if auto_pred.get("supported"):
-            return ModularVisionResult(
-                plant_detected=True,
-                crop=auto_pred.get("crop_species", crop),
-                viewpoint=auto_pred.get("plant_part", "whole_plant"),
-                supported=True,
-                disease=auto_pred.get("disease"),
-                confidence=auto_pred.get("top1_confidence", 0.0) / 100.0,
-                status=auto_pred.get("status", "confident"),
-                fallback_reason="",
-                top1_label=auto_pred.get("top1_label", ""),
-                checkpoint_path=auto_pred.get("model_path", "models/vision/whole_plant_classifier.pt"),
-                selected_model=auto_pred.get("selected_model", "DINOv2 Multi-Part Probe"),
-                predictions=auto_pred.get("predictions", []),
-                source_evidence=auto_pred.get("source_evidence"),
-                is_healthy=auto_pred.get("is_healthy", False),
-                margin=auto_pred.get("margin", 0.0),
-                chemical_treatment_withheld=auto_pred.get("chemical_treatment_withheld", False),
-                model_release_tier="VALIDATED MULTI-PART (Auto-Detected)",
-                is_experimental=False,
-                debug_info=auto_pred.get("debug_info", {}),
-            )
-
-        guidance = get_photo_guidance(viewpoint="whole_plant", crop=crop)
-        reason = f"Viewpoint '{vp_res.raw_viewpoint}' diagnosis is not trained yet for crop '{crop}'."
-        return ModularVisionResult(
-            plant_detected=True,
-            crop=crop,
-            viewpoint="unknown",
-            supported=False,
-            disease=None,
-            confidence=0.0,
-            status="unsupported",
-            fallback_reason=reason,
-            top1_label=reason,
-            checkpoint_path="None",
-            selected_model="None",
-            photo_guidance=guidance,
-        )
+            return {
+                "response": formatted,
+                "image_metadata": encoded.metadata(),
+                "used_live_api": False,
+                "model": self.model_name,
+                "error": str(exc),
+            }
